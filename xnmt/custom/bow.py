@@ -88,7 +88,7 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
     else: raise ValueError(f"unknown mode '{self.mode}'")
 
     idxs = ([], [])
-    for batch_i in range(len(trg)):
+    for batch_i in range(trg.batch_size()):
       for word in set(trg[batch_i]):
         if word not in {vocabs.Vocab.ES, vocabs.Vocab.SS}:
           idxs[0].append(word)
@@ -101,7 +101,7 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
 
   def generate(self, src, idx, forced_trg_ids):
     assert not forced_trg_ids
-    assert batchers.is_batched(src) and len(src)==1, "batched generation not fully implemented"
+    assert batchers.is_batched(src) and src.batch_size()==1, "batched generation not fully implemented"
     src = src[0]
     # Generating outputs
     outputs = []
