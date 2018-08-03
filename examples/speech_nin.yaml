@@ -25,6 +25,7 @@ exp1-speech-nin: !Experiment
         #batch_norm: True
         #nin_enabled: True
         #nonlinearity: rectify
+        hidden_dim: 64
       - !BiLSTMSeqTransducer
         layers: 1
         hidden_dim: 64

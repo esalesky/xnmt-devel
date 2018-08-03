@@ -135,12 +135,10 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
         interleaved.append(bs[-pos-1])
       
       projected = expression_seqs.ExpressionSequence(expr_list=interleaved, mask=mask)
-      self.nin_layers[layer_i].transduce(projected)
+      projected = self.nin_layers[layer_i].transduce(projected)
       assert math.ceil(len(es) / float(self.stride))==len(projected), f"mismatched len(es)=={len(es)}, stride=={self.stride}, len(projected)=={len(projected)}"
       es = projected
-      if es.has_list(): self.last_output.append(es.as_list())
-      else: self.last_output.append(es.as_tensor())
-    
+
     self._final_states = [transducers.FinalTransducerState(projected[-1])]
     return projected
 
