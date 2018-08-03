@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from xnmt import expression_seqs, param_initializers
 from xnmt.transducers import base as transducers, recurrent
 
-from xnmt import nn
+from xnmt.transducers import network_in_network
 from xnmt.events import register_xnmt_handler, handle_xnmt_event
 from xnmt.persistence import serializable_init, Serializable, Ref, bare
 
@@ -104,21 +104,17 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     nin_layers = []
     nin_layers.append([])
     for i in range(layers):
-      nin_layer = nn.NiNLayer(input_dim=hidden_dim / 2, hidden_dim=hidden_dim,
-                                   downsampling_factor=2 * self.stride,
-                                   param_init=param_init_nin[i] if isinstance(param_init_nin,
-                                                                              Sequence) else param_init_nin)
+      nin_layer = network_in_network.NinSeqTransducer(input_dim=hidden_dim / 2,
+                                                      hidden_dim=hidden_dim,
+                                                      downsample_by=2 * self.stride,
+                                                      param_init=param_init_nin[i] if isinstance(param_init_nin,
+                                                                                                 Sequence) else param_init_nin)
       nin_layers.append(nin_layer)
     return nin_layers
 
   @handle_xnmt_event
   def on_start_sent(self, *args, **kwargs):
     self._final_states = None
-    self.last_output = []
-    
-  @handle_xnmt_event
-  def on_collect_recent_outputs(self):
-    return [(self, o) for o in self.last_output]
 
   def get_final_states(self):
     assert self._final_states is not None, "LSTMSeqTransducer.transduce() must be invoked before LSTMSeqTransducer.get_final_states()"
