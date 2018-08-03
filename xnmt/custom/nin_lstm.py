@@ -18,11 +18,9 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
   and https://arxiv.org/pdf/1610.03022.pdf
 
   Args:
-    exp_global:
     layers: depth of the network
     input_dim: size of the inputs of bottom layer
     hidden_dim: size of the outputs (and intermediate layer representations)
-    nin_depth: number of NiN units (downsampling only performed for first projection)
     stride: in (first) projection layer, concatenate n frames and thus use the projection for downsampling
     batch_norm: uses batch norm between projection and non-linearity
     nonlinearity:
@@ -37,8 +35,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
   @register_xnmt_handler
   @serializable_init
   def __init__(self, layers, input_dim=Ref("exp_global.default_layer_dim"), hidden_dim=Ref("exp_global.default_layer_dim"),
-               nin_depth=1, stride=1,
-               batch_norm=False, nonlinearity="rectify",
+               stride=1, batch_norm=False, nonlinearity="rectify",
                weight_norm=False, weight_noise = Ref("exp_global.weight_noise", default=0.0), dropout=Ref("exp_global.dropout", default=0.0),
                builder_layers=None, nin_layers=None,
                param_init_lstm=Ref("exp_global.param_init", default=bare(param_initializers.GlorotInitializer)), bias_init_lstm=Ref("exp_global.bias_init", default=bare(param_initializers.ZeroInitializer)),
@@ -47,12 +44,10 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     """
     assert layers > 0
     assert hidden_dim % 2 == 0
-    assert nin_depth > 0
 
     self.builder_layers = []
     self.hidden_dim = hidden_dim
     self.stride=stride
-    self.nin_depth = nin_depth
     self.nonlinearity = nonlinearity
 
     self.builder_layers = self.add_serializable_component("builder_layers", builder_layers,
@@ -65,7 +60,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     self.nin_layers = self.add_serializable_component("nin_layers", nin_layers,
                                                       lambda: self.init_nin_layers(layers, hidden_dim,
                                                                                    param_init_nin,
-                                                                                   batch_norm, nin_depth))
+                                                                                   batch_norm))
 
   def init_builder_layers(self, layers, input_dim, hidden_dim, dropout, weight_norm, weight_noise, param_init_lstm,
                           bias_init_lstm):
@@ -111,18 +106,15 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
       builder_layers.append([f, b])
     return builder_layers
 
-  def init_nin_layers(self, layers, hidden_dim, param_init_nin, batch_norm,
-                      nin_depth):
+  def init_nin_layers(self, layers, hidden_dim, param_init_nin, batch_norm):
     nin_layers = []
     nin_layers.append([])
     for i in range(layers):
-      nin_layer = []
-      for nin_i in range(nin_depth):
-        nin_layer.append(nn.NiNLayer(input_dim=hidden_dim / 2 if nin_i == 0 else hidden_dim, hidden_dim=hidden_dim,
-                                     use_bn=batch_norm, nonlinearity=self.nonlinearity,
-                                     downsampling_factor=2 * self.stride if nin_i == 0 else 1,
-                                     param_init=param_init_nin[i] if isinstance(param_init_nin,
-                                                                                Sequence) else param_init_nin))
+      nin_layer = nn.NiNLayer(input_dim=hidden_dim / 2, hidden_dim=hidden_dim,
+                                   use_bn=batch_norm, nonlinearity=self.nonlinearity,
+                                   downsampling_factor=2 * self.stride,
+                                   param_init=param_init_nin[i] if isinstance(param_init_nin,
+                                                                              Sequence) else param_init_nin)
       nin_layers.append(nin_layer)
     return nin_layers
 
@@ -140,8 +132,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     return self._final_states
         
   def transduce(self, es: expression_seqs.ExpressionSequence) -> expression_seqs.ExpressionSequence:
-    for nin_layer in self.nin_layers[0]:
-      es = nin_layer(es)
+    es = self.nin_layers[0].transduce(es)
       
     for layer_i, (fb, bb) in enumerate(self.builder_layers):
       fs = fb.transduce(es)
@@ -157,8 +148,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
         interleaved.append(bs[-pos-1])
       
       projected = expression_seqs.ExpressionSequence(expr_list=interleaved, mask=mask)
-      for nin_layer in self.nin_layers[layer_i+1]:
-        projected = nin_layer(projected)
+      self.nin_layers[layer_i + 1].transduce(projected)
       assert math.ceil(len(es) / float(self.stride))==len(projected)
       es = projected
       if es.has_list(): self.last_output.append(es.as_list())
