@@ -20,11 +20,11 @@ exp1-speech-nin: !Experiment
       - !NetworkInNetworkBiLSTMTransducer
         layers: 2
         stride: 2
-        nin_depth: 1
+        #nin_depth: 1
         input_dim: 40
         batch_norm: True
         nin_enabled: True
-        nonlinearity: rectify
+        #nonlinearity: rectify
       - !BiLSTMSeqTransducer
         layers: 1
         hidden_dim: 64

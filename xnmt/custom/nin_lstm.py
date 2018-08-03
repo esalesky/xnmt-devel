@@ -23,7 +23,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     hidden_dim: size of the outputs (and intermediate layer representations)
     stride: in (first) projection layer, concatenate n frames and thus use the projection for downsampling
     batch_norm: uses batch norm between projection and non-linearity
-    nonlinearity:
     param_init_lstm: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
                 specifying how to initialize weight matrices. If a list is given, each entry denotes one layer.
     bias_init_lstm: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
@@ -34,11 +33,19 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
   yaml_tag = u'!NetworkInNetworkBiLSTMTransducer'
   @register_xnmt_handler
   @serializable_init
-  def __init__(self, layers, input_dim=Ref("exp_global.default_layer_dim"), hidden_dim=Ref("exp_global.default_layer_dim"),
-               stride=1, batch_norm=False, nonlinearity="rectify",
-               weight_norm=False, weight_noise = Ref("exp_global.weight_noise", default=0.0), dropout=Ref("exp_global.dropout", default=0.0),
-               builder_layers=None, nin_layers=None,
-               param_init_lstm=Ref("exp_global.param_init", default=bare(param_initializers.GlorotInitializer)), bias_init_lstm=Ref("exp_global.bias_init", default=bare(param_initializers.ZeroInitializer)),
+  def __init__(self,
+               layers,
+               input_dim=Ref("exp_global.default_layer_dim"),
+               hidden_dim=Ref("exp_global.default_layer_dim"),
+               stride=1,
+               batch_norm=False,
+               weight_norm=False,
+               weight_noise = Ref("exp_global.weight_noise", default=0.0),
+               dropout=Ref("exp_global.dropout", default=0.0),
+               builder_layers=None,
+               nin_layers=None,
+               param_init_lstm=Ref("exp_global.param_init", default=bare(param_initializers.GlorotInitializer)),
+               bias_init_lstm=Ref("exp_global.bias_init", default=bare(param_initializers.ZeroInitializer)),
                param_init_nin=Ref("exp_global.param_init", default=bare(param_initializers.GlorotInitializer))):
     """
     """
@@ -48,7 +55,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     self.builder_layers = []
     self.hidden_dim = hidden_dim
     self.stride=stride
-    self.nonlinearity = nonlinearity
 
     self.builder_layers = self.add_serializable_component("builder_layers", builder_layers,
                                                           lambda: self.init_builder_layers(layers, input_dim,
@@ -111,7 +117,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     nin_layers.append([])
     for i in range(layers):
       nin_layer = nn.NiNLayer(input_dim=hidden_dim / 2, hidden_dim=hidden_dim,
-                                   use_bn=batch_norm, nonlinearity=self.nonlinearity,
+                                   use_bn=batch_norm, 
                                    downsampling_factor=2 * self.stride,
                                    param_init=param_init_nin[i] if isinstance(param_init_nin,
                                                                               Sequence) else param_init_nin)
