@@ -23,6 +23,7 @@ dyparams.from_args()
 # using the !Classname YAML syntax
 import xnmt.batchers
 import xnmt.custom.nin_lstm
+import xnmt.custom.bow
 import xnmt.eval.metrics
 import xnmt.eval.tasks
 import xnmt.experiments
