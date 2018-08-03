@@ -22,7 +22,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     input_dim: size of the inputs of bottom layer
     hidden_dim: size of the outputs (and intermediate layer representations)
     stride: in (first) projection layer, concatenate n frames and thus use the projection for downsampling
-    batch_norm: uses batch norm between projection and non-linearity
     param_init_lstm: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
                 specifying how to initialize weight matrices. If a list is given, each entry denotes one layer.
     bias_init_lstm: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
@@ -38,7 +37,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
                input_dim=Ref("exp_global.default_layer_dim"),
                hidden_dim=Ref("exp_global.default_layer_dim"),
                stride=1,
-               batch_norm=False,
                weight_norm=False,
                weight_noise = Ref("exp_global.weight_noise", default=0.0),
                dropout=Ref("exp_global.dropout", default=0.0),
@@ -65,8 +63,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
 
     self.nin_layers = self.add_serializable_component("nin_layers", nin_layers,
                                                       lambda: self.init_nin_layers(layers, hidden_dim,
-                                                                                   param_init_nin,
-                                                                                   batch_norm))
+                                                                                   param_init_nin))
 
   def init_builder_layers(self, layers, input_dim, hidden_dim, dropout, weight_norm, weight_noise, param_init_lstm,
                           bias_init_lstm):
@@ -112,12 +109,11 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
       builder_layers.append([f, b])
     return builder_layers
 
-  def init_nin_layers(self, layers, hidden_dim, param_init_nin, batch_norm):
+  def init_nin_layers(self, layers, hidden_dim, param_init_nin):
     nin_layers = []
     nin_layers.append([])
     for i in range(layers):
       nin_layer = nn.NiNLayer(input_dim=hidden_dim / 2, hidden_dim=hidden_dim,
-                                   use_bn=batch_norm, 
                                    downsampling_factor=2 * self.stride,
                                    param_init=param_init_nin[i] if isinstance(param_init_nin,
                                                                               Sequence) else param_init_nin)
