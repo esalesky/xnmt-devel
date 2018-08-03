@@ -40,7 +40,7 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
                hidden_dim=Ref("exp_global.default_layer_dim"),
                stride=1,
                dropout=Ref("exp_global.dropout", default=0.0),
-               builder_layers=None,
+               lstm_layers=None,
                nin_layers=None,
                param_init_lstm=Ref("exp_global.param_init", default=bare(param_initializers.GlorotInitializer)),
                bias_init_lstm=Ref("exp_global.bias_init", default=bare(param_initializers.ZeroInitializer)),
@@ -54,7 +54,7 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     self.hidden_dim = hidden_dim
     self.stride=stride
 
-    self.lstm_layers = self.add_serializable_component("builder_layers", builder_layers,
+    self.lstm_layers = self.add_serializable_component("lstm_layers", lstm_layers,
                                                        lambda: self.init_lstm_layers(layers, input_dim,
                                                                                      hidden_dim, dropout,
                                                                                      param_init_lstm,
@@ -67,14 +67,14 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
   def init_lstm_layers(self, layers, input_dim, hidden_dim, dropout, param_init_lstm, bias_init_lstm):
     lstm_layers = []
     f = recurrent.UniLSTMSeqTransducer(input_dim=input_dim,
-                                       hidden_dim=hidden_dim / 2,
+                                       hidden_dim=hidden_dim // 2,
                                        dropout=dropout,
                                        param_init=param_init_lstm[0] if isinstance(param_init_lstm,
                                                                                    Sequence) else param_init_lstm,
                                        bias_init=bias_init_lstm[0] if isinstance(bias_init_lstm,
                                                                                  Sequence) else bias_init_lstm)
     b = recurrent.UniLSTMSeqTransducer(input_dim=input_dim,
-                                       hidden_dim=hidden_dim / 2,
+                                       hidden_dim=hidden_dim // 2,
                                        dropout=dropout,
                                        param_init=param_init_lstm[0] if isinstance(param_init_lstm,
                                                                                    Sequence) else param_init_lstm,
@@ -83,14 +83,14 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     lstm_layers.append([f, b])
     for i in range(1, layers):
       f = recurrent.UniLSTMSeqTransducer(input_dim=hidden_dim,
-                                         hidden_dim=hidden_dim / 2,
+                                         hidden_dim=hidden_dim // 2,
                                          dropout=dropout,
                                          param_init=param_init_lstm[i] if isinstance(param_init_lstm,
                                                                                      Sequence) else param_init_lstm,
                                          bias_init=bias_init_lstm[i] if isinstance(bias_init_lstm,
                                                                                    Sequence) else bias_init_lstm)
       b = recurrent.UniLSTMSeqTransducer(input_dim=hidden_dim,
-                                         hidden_dim=hidden_dim / 2,
+                                         hidden_dim=hidden_dim // 2,
                                          dropout=dropout,
                                          param_init=param_init_lstm[i] if isinstance(param_init_lstm,
                                                                                      Sequence) else param_init_lstm,
@@ -102,7 +102,7 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
   def init_nin_layers(self, layers, hidden_dim, param_init_nin):
     nin_layers = []
     for i in range(layers):
-      nin_layer = network_in_network.NinSeqTransducer(input_dim=hidden_dim / 2,
+      nin_layer = network_in_network.NinSeqTransducer(input_dim=hidden_dim // 2,
                                                       hidden_dim=hidden_dim,
                                                       downsample_by=2 * self.stride,
                                                       param_init=param_init_nin[i] if isinstance(param_init_nin,
@@ -135,7 +135,8 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
       
       projected = expression_seqs.ExpressionSequence(expr_list=interleaved, mask=mask)
       projected = self.nin_layers[layer_i].transduce(projected)
-      assert math.ceil(len(es) / float(self.stride))==len(projected), f"mismatched len(es)=={len(es)}, stride=={self.stride}, len(projected)=={len(projected)}"
+      assert math.ceil(len(es) / float(self.stride))==len(projected), \
+        f"mismatched len(es)=={len(es)}, stride=={self.stride}, len(projected)=={len(projected)}"
       es = projected
 
     self._final_states = [transducers.FinalTransducerState(projected[-1])]

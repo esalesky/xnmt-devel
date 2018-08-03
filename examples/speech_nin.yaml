@@ -28,6 +28,7 @@ exp1-speech-nin: !Experiment
         hidden_dim: 64
       - !BiLSTMSeqTransducer
         layers: 1
+        input_dim: 64
         hidden_dim: 64
     attender: !MlpAttender
       state_dim: 64
@@ -66,6 +67,8 @@ exp1-speech-nin: !Experiment
         hyp_file: examples/output/{EXP}.dev_hyp
         inference: !AutoRegressiveInference
           post_process: join-char
+          batcher: !InOrderBatcher
+            pad_src_to_multiple: 4
   evaluate:
     - !AccuracyEvalTask
       eval_metrics: cer,wer
