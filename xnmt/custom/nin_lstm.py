@@ -10,7 +10,7 @@ from xnmt.persistence import serializable_init, Serializable, Ref, bare
 
 
 
-class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
+class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
   """
   Builder for NiN-interleaved RNNs that delegates to regular RNNs and wires them together.
   See http://iamaaditya.github.io/2016/03/one-by-one-convolution/
@@ -31,7 +31,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     param_init_nin: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
                 specifying how to initialize weight matrices. If a list is given, each entry denotes one layer.
   """
-  yaml_tag = u'!NetworkInNetworkBiLSTMTransducer'
+  yaml_tag = u'!NinBiLSTMTransducer'
   @register_xnmt_handler
   @serializable_init
   def __init__(self,
@@ -102,7 +102,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
 
   def init_nin_layers(self, layers, hidden_dim, param_init_nin):
     nin_layers = []
-    nin_layers.append([])
     for i in range(layers):
       nin_layer = network_in_network.NinSeqTransducer(input_dim=hidden_dim / 2,
                                                       hidden_dim=hidden_dim,
@@ -121,8 +120,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     return self._final_states
         
   def transduce(self, es: expression_seqs.ExpressionSequence) -> expression_seqs.ExpressionSequence:
-    es = self.nin_layers[0].transduce(es)
-      
+
     for layer_i, (fb, bb) in enumerate(self.builder_layers):
       fs = fb.transduce(es)
       bs = bb.transduce(expression_seqs.ReversedExpressionSequence(es))
@@ -137,8 +135,8 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
         interleaved.append(bs[-pos-1])
       
       projected = expression_seqs.ExpressionSequence(expr_list=interleaved, mask=mask)
-      self.nin_layers[layer_i + 1].transduce(projected)
-      assert math.ceil(len(es) / float(self.stride))==len(projected)
+      self.nin_layers[layer_i].transduce(projected)
+      assert math.ceil(len(es) / float(self.stride))==len(projected), f"mismatched len(es)=={len(es)}, stride=={self.stride}, len(projected)=={len(projected)}"
       es = projected
       if es.has_list(): self.last_output.append(es.as_list())
       else: self.last_output.append(es.as_tensor())
