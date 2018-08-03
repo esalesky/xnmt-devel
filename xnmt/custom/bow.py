@@ -55,7 +55,7 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
     return [{".src_embedder.emb_dim", ".encoder.input_dim"},
             {".encoder.hidden_dim", ".mlp_layer.input_dim"}]
 
-  def calc_loss(self, src, trg, loss_calculator):
+  def calc_nll(self, src, trg):
     event_trigger.start_sent(src)
     embeddings = self.src_embedder.embed_sent(src)
     encodings = self.encoder.transduce(embeddings)
@@ -95,11 +95,9 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
           idxs[1].append(batch_i)
     trg_scores = dy.sparse_inputTensor(idxs, values = np.ones(len(idxs[0])), shape=scores.dim()[0] + (scores.dim()[1],), batched=True, )
     loss_expr = dy.binary_log_loss(scores, trg_scores)
-    bow_loss = losses.FactoredLossExpr({"mle" : loss_expr})
+    return loss_expr
 
-    return bow_loss
-
-  def generate(self, src, idx, forced_trg_ids):
+  def generate(self, src, forced_trg_ids):
     assert not forced_trg_ids
     assert batchers.is_batched(src) and src.batch_size()==1, "batched generation not fully implemented"
     src = src[0]

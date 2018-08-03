@@ -1,7 +1,6 @@
 import unittest
 import os, shutil
 
-from test.utils import has_cython
 import xnmt.xnmt_run_experiments as run
 import xnmt.events
 
@@ -12,7 +11,6 @@ class TestRunningConfig(unittest.TestCase):
 
   def test_bow(self):
     run.main(["test/custom/bow.yaml"])
-
 
   def tearDown(self):
     try:
