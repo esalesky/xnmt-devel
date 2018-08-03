@@ -173,8 +173,8 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
     return output_state
 
 
-class BowFScoreEvaluator(metrics.SentenceLevelEvaluator, Serializable):
-  yaml_tag = "!BowFScoreEvaluator"
+class BowFMeasureEvaluator(metrics.SentenceLevelEvaluator, Serializable):
+  yaml_tag = "!BowFMeasureEvaluator"
   @serializable_init
   def __init__(self, case_sensitive=False, write_sentence_scores: Optional[str] = None) -> None:
     super().__init__(write_sentence_scores=write_sentence_scores)
@@ -186,4 +186,4 @@ class BowFScoreEvaluator(metrics.SentenceLevelEvaluator, Serializable):
       hyp = [hyp_i.lower() for hyp_i in hyp]
     ref_set = set(ref)
     hyp_set = set(hyp)
-    return metrics.FScore(true_pos=len(hyp_set & ref_set), false_neg=len(ref_set - hyp_set), false_pos=len(hyp_set - ref_set))
+    return metrics.FMeasure(true_pos=len(hyp_set & ref_set), false_neg=len(ref_set - hyp_set), false_pos=len(hyp_set - ref_set))

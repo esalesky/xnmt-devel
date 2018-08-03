@@ -9,12 +9,12 @@ from xnmt.modelparts.decoders import AutoRegressiveDecoder
 from xnmt.modelparts.embedders import SimpleWordEmbedder
 from xnmt.input_readers import PlainTextReader
 from xnmt.transducers.recurrent import UniLSTMSeqTransducer, BiLSTMSeqTransducer
-from xnmt.loss_calculators import AutoRegressiveMLELoss
-from xnmt.param_collections import ParamManager
+from xnmt.loss_calculators import MLELoss
 from xnmt.modelparts.transforms import NonLinear
 from xnmt.modelparts.scorers import Softmax
 from xnmt.models.translators import DefaultTranslator
 from xnmt.search_strategies import BeamSearch, GreedySearch
+from xnmt.param_collections import ParamManager
 from xnmt.vocabs import Vocab
 
 class TestForcedDecodingOutputs(unittest.TestCase):
@@ -51,7 +51,7 @@ class TestForcedDecodingOutputs(unittest.TestCase):
 
   def assert_forced_decoding(self, sent_id):
     dy.renew_cg()
-    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[sent_id]]), [sent_id], BeamSearch(),
+    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[sent_id]]), BeamSearch(),
                                   forced_trg_ids=batchers.mark_as_batch([self.trg_data[sent_id]]))
     self.assertItemsEqual(self.trg_data[sent_id].words, outputs[0].words)
 
@@ -88,11 +88,10 @@ class TestForcedDecodingLoss(unittest.TestCase):
 
   def test_single(self):
     dy.renew_cg()
-    train_loss = self.model.calc_loss(src=self.src_data[0],
-                                      trg=self.trg_data[0],
-                                      loss_calculator=AutoRegressiveMLELoss()).value()
+    train_loss = self.model.calc_nll(src=self.src_data[0],
+                                     trg=self.trg_data[0]).value()
     dy.renew_cg()
-    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[0]]), [0], BeamSearch(beam_size=1),
+    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[0]]), BeamSearch(beam_size=1),
                                   forced_trg_ids=batchers.mark_as_batch([self.trg_data[0]]))
     self.assertAlmostEqual(-outputs[0].score, train_loss, places=4)
 
@@ -125,12 +124,11 @@ class TestFreeDecodingLoss(unittest.TestCase):
 
   def test_single(self):
     dy.renew_cg()
-    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[0]]), [0], BeamSearch(),
+    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[0]]), BeamSearch(),
                                   forced_trg_ids=batchers.mark_as_batch([self.trg_data[0]]))
     dy.renew_cg()
-    train_loss = self.model.calc_loss(src=self.src_data[0],
-                                      trg=outputs[0],
-                                      loss_calculator=AutoRegressiveMLELoss()).value()
+    train_loss = self.model.calc_nll(src=self.src_data[0],
+                                     trg=outputs[0]).value()
 
     self.assertAlmostEqual(-outputs[0].score, train_loss, places=4)
 
@@ -165,12 +163,12 @@ class TestGreedyVsBeam(unittest.TestCase):
 
   def test_greedy_vs_beam(self):
     dy.renew_cg()
-    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[0]]), [0], BeamSearch(beam_size=1),
+    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[0]]), BeamSearch(beam_size=1),
                                   forced_trg_ids=batchers.mark_as_batch([self.trg_data[0]]))
     output_score1 = outputs[0].score
 
     dy.renew_cg()
-    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[0]]), [0], GreedySearch(),
+    outputs = self.model.generate(batchers.mark_as_batch([self.src_data[0]]), GreedySearch(),
                                   forced_trg_ids=batchers.mark_as_batch([self.trg_data[0]]))
     output_score2 = outputs[0].score
 

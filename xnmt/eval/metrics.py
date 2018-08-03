@@ -370,8 +370,8 @@ class SequenceAccuracyScore(SentenceLevelEvalScore, Serializable):
                                  desc=desc)
 
 
-class FScore(SentenceLevelEvalScore, Serializable):
-  yaml_tag = "!FScore"
+class FMeasure(SentenceLevelEvalScore, Serializable):
+  yaml_tag = "!FMeasure"
   @serializable_init
   def __init__(self, true_pos: int, false_neg: int, false_pos: int, desc: Any = None):
     self.true_pos = true_pos
@@ -399,10 +399,10 @@ class FScore(SentenceLevelEvalScore, Serializable):
            f"TP={self.true_pos},FP={self.false_pos},FN={self.false_neg})"
   @staticmethod
   def aggregate(scores: Sequence['SentenceLevelEvalScore'], desc: Any = None):
-    return FScore(true_pos=sum(s.true_pos for s in scores),
-                  false_neg=sum(s.false_neg for s in scores),
-                  false_pos=sum(s.false_pos for s in scores),
-                  desc=desc)
+    return FMeasure( true_pos=sum(s.true_pos for s in scores),
+                    false_neg=sum(s.false_neg for s in scores),
+                    false_pos=sum(s.false_pos for s in scores),
+                    desc=desc)
 
 
 class Evaluator(object):
@@ -465,7 +465,7 @@ class SentenceLevelEvaluator(Evaluator):
       with open(self.write_sentence_scores, "w") as f_out: f_out.write(yaml.dump(sentence_scores))
     return sentence_scores[0].__class__.aggregate(sentence_scores, desc=desc)
 
-class FastBLEUEvaluator(Evaluator, Serializable):
+class FastBLEUEvaluator(SentenceLevelEvaluator, Serializable):
   """
   Class for computing BLEU scores using a fast Cython implementation.
 
@@ -479,20 +479,21 @@ class FastBLEUEvaluator(Evaluator, Serializable):
   yaml_tag = "!FastBLEUEvaluator"
 
   @serializable_init
-  def __init__(self, ngram: int = 4, smooth = 0):
+  def __init__(self, ngram:int = 4, smooth:float = 1):
     self.ngram = ngram
     self.weights = (1 / ngram) * np.ones(ngram, dtype=np.float32)
     self.smooth = smooth
     self.reference_corpus = None
     self.candidate_corpus = None
 
-  def evaluate(self, ref, hyp, desc=None):
+  def evaluate_one_sent(self, ref, hyp):
     try:
       from xnmt.cython import xnmt_cython
     except:
       logger.error("BLEU evaluate fast requires xnmt cython installation step."
                    "please check the documentation.")
       raise
+    if len(ref) == 0 or len(hyp) == 0: return 0
     return xnmt_cython.bleu_sentence(self.ngram, self.smooth, ref, hyp)
 
 
@@ -920,7 +921,7 @@ class SequenceAccuracyEvaluator(SentenceLevelEvaluator, Serializable):
     return SequenceAccuracyScore(num_correct=correct, num_total=1)
 
 
-class FScoreEvaluator(SentenceLevelEvaluator, Serializable):
+class FMeasureEvaluator(SentenceLevelEvaluator, Serializable):
   """
   A class to evaluate the quality of output in terms of classification F-score.
 
@@ -928,7 +929,7 @@ class FScoreEvaluator(SentenceLevelEvaluator, Serializable):
     pos_token: token for the 'positive' class
     write_sentence_scores: path of file to write sentence-level scores to (in YAML format)
   """
-  yaml_tag = "!FScoreEvaluator"
+  yaml_tag = "!FMeasureEvaluator"
   @serializable_init
   def __init__(self, pos_token:str="1", write_sentence_scores: Optional[str] = None) -> None:
     super().__init__(write_sentence_scores=write_sentence_scores)
@@ -946,6 +947,6 @@ class FScoreEvaluator(SentenceLevelEvaluator, Serializable):
     if len(ref)!=1 or len(hyp)!=1: raise ValueError("FScore requires scalar ref and hyp")
     ref = ref[0]
     hyp = hyp[0]
-    return FScore(true_pos= 1 if (ref==hyp) and (hyp==self.pos_token) else 0,
-                  false_neg= 1 if (ref!=hyp) and (hyp!=self.pos_token) else 0,
-                  false_pos= 1 if (ref!=hyp) and (hyp==self.pos_token) else 0)
+    return FMeasure( true_pos=1 if (ref == hyp) and (hyp == self.pos_token) else 0,
+                    false_neg=1 if (ref != hyp) and (hyp != self.pos_token) else 0,
+                    false_pos=1 if (ref != hyp) and (hyp == self.pos_token) else 0)
