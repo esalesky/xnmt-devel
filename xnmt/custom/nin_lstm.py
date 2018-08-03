@@ -1,5 +1,4 @@
 import math
-import random
 from collections.abc import Sequence
 
 from xnmt import expression_seqs, param_initializers
@@ -21,7 +20,10 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     layers: depth of the network
     input_dim: size of the inputs of bottom layer
     hidden_dim: size of the outputs (and intermediate layer representations)
-    stride: in (first) projection layer, concatenate n frames and thus use the projection for downsampling
+    stride: in projection layer, concatenate n frames and thus use the projection for downsampling
+    dropout: LSTM dropout
+    builder_layers: set automatically
+    nin_layers: set automatically
     param_init_lstm: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
                 specifying how to initialize weight matrices. If a list is given, each entry denotes one layer.
     bias_init_lstm: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
