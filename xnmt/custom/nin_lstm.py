@@ -37,7 +37,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
                input_dim=Ref("exp_global.default_layer_dim"),
                hidden_dim=Ref("exp_global.default_layer_dim"),
                stride=1,
-               weight_norm=False,
                weight_noise = Ref("exp_global.weight_noise", default=0.0),
                dropout=Ref("exp_global.dropout", default=0.0),
                builder_layers=None,
@@ -57,7 +56,7 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     self.builder_layers = self.add_serializable_component("builder_layers", builder_layers,
                                                           lambda: self.init_builder_layers(layers, input_dim,
                                                                                            hidden_dim, dropout,
-                                                                                           weight_norm, weight_noise,
+                                                                                           weight_noise,
                                                                                            param_init_lstm,
                                                                                            bias_init_lstm))
 
@@ -65,13 +64,12 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
                                                       lambda: self.init_nin_layers(layers, hidden_dim,
                                                                                    param_init_nin))
 
-  def init_builder_layers(self, layers, input_dim, hidden_dim, dropout, weight_norm, weight_noise, param_init_lstm,
+  def init_builder_layers(self, layers, input_dim, hidden_dim, dropout, weight_noise, param_init_lstm,
                           bias_init_lstm):
     builder_layers = []
     f = recurrent.UniLSTMSeqTransducer(input_dim=input_dim,
                                        hidden_dim=hidden_dim / 2,
                                        dropout=dropout,
-                                       weight_norm=weight_norm,
                                        weightnoise_std=weight_noise,
                                        param_init=param_init_lstm[0] if isinstance(param_init_lstm,
                                                                                    Sequence) else param_init_lstm,
@@ -80,7 +78,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     b = recurrent.UniLSTMSeqTransducer(input_dim=input_dim,
                                        hidden_dim=hidden_dim / 2,
                                        dropout=dropout,
-                                       weight_norm=weight_norm,
                                        weightnoise_std=weight_noise,
                                        param_init=param_init_lstm[0] if isinstance(param_init_lstm,
                                                                                    Sequence) else param_init_lstm,
@@ -91,7 +88,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
       f = recurrent.UniLSTMSeqTransducer(input_dim=hidden_dim,
                                          hidden_dim=hidden_dim / 2,
                                          dropout=dropout,
-                                         weight_norm=weight_norm,
                                          weightnoise_std=weight_noise,
                                          param_init=param_init_lstm[i] if isinstance(param_init_lstm,
                                                                                      Sequence) else param_init_lstm,
@@ -100,7 +96,6 @@ class NetworkInNetworkBiLSTMTransducer(transducers.SeqTransducer, Serializable):
       b = recurrent.UniLSTMSeqTransducer(input_dim=hidden_dim,
                                          hidden_dim=hidden_dim / 2,
                                          dropout=dropout,
-                                         weight_norm=weight_norm,
                                          weightnoise_std=weight_noise,
                                          param_init=param_init_lstm[i] if isinstance(param_init_lstm,
                                                                                      Sequence) else param_init_lstm,

@@ -22,8 +22,8 @@ exp1-speech-nin: !Experiment
         stride: 2
         #nin_depth: 1
         input_dim: 40
-        batch_norm: True
-        nin_enabled: True
+        #batch_norm: True
+        #nin_enabled: True
         #nonlinearity: rectify
       - !BiLSTMSeqTransducer
         layers: 1
