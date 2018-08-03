@@ -9,6 +9,26 @@ from xnmt.events import register_xnmt_handler, handle_xnmt_event
 from xnmt.persistence import serializable_init, Serializable, Ref, bare
 
 
+class ZhangSeqTransducer(transducers.ModularSeqTransducer, Serializable):
+  yaml_tag = "!ZhangSeqTransducer"
+  @serializable_init
+  def __init__(self,
+               input_dim, hidden_dim,
+               dropout=Ref("exp_global.dropout", default=0.0),
+               bottom_layer=None, top_layer=None):
+    self.bottom_layer = self.add_serializable_component("bottom_layer", bottom_layer,
+                                                        lambda: NinBiLSTMTransducer(layers=2,
+                                                                                    input_dim=input_dim,
+                                                                                    hidden_dim=hidden_dim,
+                                                                                    stride=2,
+                                                                                    dropout=dropout))
+    self.top_layer = self.add_serializable_component("top_layer", top_layer,
+                                                     lambda: recurrent.BiLSTMSeqTransducer(layers=1,
+                                                                                           input_dim=hidden_dim,
+                                                                                           hidden_dim=hidden_dim,
+                                                                                           dropout=dropout))
+
+    self.modules = [self.bottom_layer, self.top_layer]
 
 class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
   """
@@ -24,14 +44,14 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     dropout: LSTM dropout
     builder_layers: set automatically
     nin_layers: set automatically
-    param_init_lstm: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
+    param_init_lstm: a ParamInitializer or list of ParamInitializer objects
                 specifying how to initialize weight matrices. If a list is given, each entry denotes one layer.
-    bias_init_lstm: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
+    bias_init_lstm: a ParamInitializer or list of ParamInitializer objects
                specifying how to initialize bias vectors. If a list is given, each entry denotes one layer.
-    param_init_nin: a :class:`xnmt.param_init.ParamInitializer` or list of :class:`xnmt.param_init.ParamInitializer` objects
+    param_init_nin: a ParamInitializer or list of ParamInitializer objects
                 specifying how to initialize weight matrices. If a list is given, each entry denotes one layer.
   """
-  yaml_tag = u'!NinBiLSTMTransducer'
+  yaml_tag = '!NinBiLSTMTransducer'
   @register_xnmt_handler
   @serializable_init
   def __init__(self,
