@@ -1,13 +1,15 @@
-from typing import Optional
+from typing import Optional, Sequence
 
 import dynet as dy
 import numpy as np
 
-from xnmt import batchers, event_trigger, inferences, input_readers, losses, output, vocabs
+from xnmt import batchers, event_trigger, inferences, input_readers, losses, sent, vocabs
+from xnmt.eval import metrics
 from xnmt.modelparts import embedders, transforms
 from xnmt.models import base as models
 from xnmt.transducers import recurrent, base as transducers
 from xnmt.persistence import serializable_init, Serializable, bare, Ref
+
 
 class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable):
   """
@@ -47,7 +49,6 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
                                                                              output_dim=len(trg_reader.vocab)))
     self.inference = inference
     self.mode = mode
-    self.post_processor = output.PlainTextOutputProcessor()
     self.generate_per_step = generate_per_step
 
   def shared_params(self):
@@ -57,7 +58,7 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
   def calc_loss(self, src, trg, loss_calculator):
     event_trigger.start_sent(src)
     embeddings = self.src_embedder.embed_sent(src)
-    encodings = self.encoder(embeddings)
+    encodings = self.encoder.transduce(embeddings)
     if not batchers.is_batched(trg): trg = batchers.mark_as_batch([trg])
 
     if self.mode in ["avg_mlp", "final_mlp"]:
@@ -69,11 +70,11 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
           encoding_fixed_size = dy.sum_dim(encodings.as_tensor(), [1]) / encodings.dim()[0][1]
       elif self.mode=="final_mlp":
         encoding_fixed_size = self.encoder.get_final_states()[-1].main_expr()
-      scores = dy.logistic(self.output_layer(encoding_fixed_size))
+      scores = dy.logistic(self.output_layer.transform(encoding_fixed_size))
     elif self.mode=="lin_sum_sig":
       enc_lin = []
       for step_i, enc_i in enumerate(encodings):
-        step_linear = self.output_layer(enc_i)
+        step_linear = self.output_layer.transform(enc_i)
         if encodings.mask and np.sum(encodings.mask.np_arr[:,step_i])>0:
           step_linear = dy.cmult(step_linear, dy.inputTensor(1.0 - encodings.mask.np_arr[:,step_i], batched=True))
         enc_lin.append(step_linear)
@@ -98,64 +99,62 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
 
     return bow_loss
 
-  def generate(self, src, idx):
-    if not batchers.is_batched(src):
-      src = batchers.mark_as_batch([src])
-    assert len(src)==1, "batched generation not fully implemented"
+  def generate(self, src, idx, forced_trg_ids):
+    assert not forced_trg_ids
+    assert batchers.is_batched(src) and len(src)==1, "batched generation not fully implemented"
+    src = src[0]
     # Generating outputs
     outputs = []
-    for sents in src:
-      event_trigger.start_sent(src)
-      embeddings = self.src_embedder.embed_sent(sents)
-      encodings = self.encoder(embeddings)
-      if self.mode in ["avg_mlp", "final_mlp"]:
-        if self.generate_per_step:
-          assert self.mode == "avg_mlp", "final_mlp not supported with generate_per_step=True"
-          scores = [dy.logistic(self.output_layer(enc_i)) for enc_i in encodings]
-        else:
-          if self.mode == "avg_mlp":
-            encoding_fixed_size = dy.sum_dim(encodings.as_tensor(), [1]) * (1.0 / encodings.dim()[0][1])
-          elif self.mode == "final_mlp":
-            encoding_fixed_size = self.encoder.get_final_states()[-1].main_expr()
-          scores = dy.logistic(self.output_layer(encoding_fixed_size))
-      elif self.mode == "lin_sum_sig":
-        enc_lin = []
-        for step_i, enc_i in enumerate(encodings):
-          step_linear = self.output_layer(enc_i)
-          if encodings.mask and np.sum(encodings.mask.np_arr[:, step_i]) > 0:
-            step_linear = dy.cmult(step_linear, dy.inputTensor(1.0 - encodings.mask.np_arr[:, step_i], batched=True))
-          enc_lin.append(step_linear)
-        if self.generate_per_step:
-          scores = [dy.logistic(enc_i) for enc_i in enc_lin]
-        else:
-          if encodings.mask:
-            encoding_fixed_size = dy.cdiv(dy.esum(enc_lin),
-                                          dy.inputTensor(np.sum(1.0 - encodings.mask.np_arr, axis=1), batched=True))
-          else:
-            encoding_fixed_size = dy.esum(enc_lin) / encodings.dim()[0][1]
-          scores = dy.logistic(encoding_fixed_size)
-      else:
-        raise ValueError(f"unknown mode '{self.mode}'")
-
+    event_trigger.start_sent(src)
+    embeddings = self.src_embedder.embed_sent(src)
+    encodings = self.encoder.transduce(embeddings)
+    if self.mode in ["avg_mlp", "final_mlp"]:
       if self.generate_per_step:
-        output_actions = [np.argmax(score_i.npvalue()) for score_i in scores]
-        score = np.sum([np.max(score_i.npvalue()) for score_i in scores])
-        # Append output to the outputs
-        outputs.append(output.TextOutput(actions=output_actions,
-                                         vocab=self.trg_reader.vocab,
-                                         score=score))
+        assert self.mode == "avg_mlp", "final_mlp not supported with generate_per_step=True"
+        scores = [dy.logistic(self.output_layer.transform(enc_i)) for enc_i in encodings]
       else:
-        scores_arr = scores.npvalue()
-        output_actions = list(np.nonzero(scores_arr > 0.5)[0])
-        score = np.sum(scores_arr[scores_arr > 0.5])
-        # Append output to the outputs
-        outputs.append(output.TextOutput(actions=output_actions,
-                                         vocab=self.trg_reader.vocab,
-                                         score=score))
-    return outputs
+        if self.mode == "avg_mlp":
+          encoding_fixed_size = dy.sum_dim(encodings.as_tensor(), [1]) * (1.0 / encodings.dim()[0][1])
+        elif self.mode == "final_mlp":
+          encoding_fixed_size = self.encoder.get_final_states()[-1].main_expr()
+        scores = dy.logistic(self.output_layer.transform(encoding_fixed_size))
+    elif self.mode == "lin_sum_sig":
+      enc_lin = []
+      for step_i, enc_i in enumerate(encodings):
+        step_linear = self.output_layer.transform(enc_i)
+        if encodings.mask and np.sum(encodings.mask.np_arr[:, step_i]) > 0:
+          step_linear = dy.cmult(step_linear, dy.inputTensor(1.0 - encodings.mask.np_arr[:, step_i], batched=True))
+        enc_lin.append(step_linear)
+      if self.generate_per_step:
+        scores = [dy.logistic(enc_i) for enc_i in enc_lin]
+      else:
+        if encodings.mask:
+          encoding_fixed_size = dy.cdiv(dy.esum(enc_lin),
+                                        dy.inputTensor(np.sum(1.0 - encodings.mask.np_arr, axis=1), batched=True))
+        else:
+          encoding_fixed_size = dy.esum(enc_lin) / encodings.dim()[0][1]
+        scores = dy.logistic(encoding_fixed_size)
+    else:
+      raise ValueError(f"unknown mode '{self.mode}'")
 
-  def set_post_processor(self, post_processor):
-    self.post_processor = post_processor
+    if self.generate_per_step:
+      output_actions = [np.argmax(score_i.npvalue()) for score_i in scores]
+      score = np.sum([np.max(score_i.npvalue()) for score_i in scores])
+      outputs.append(sent.SimpleSentence(words=output_actions,
+                                         idx=src.idx,
+                                         vocab=getattr(self.trg_reader, "vocab", None),
+                                         score=score,
+                                         output_procs=self.trg_reader.output_procs))
+    else:
+      scores_arr = scores.npvalue()
+      output_actions = list(np.nonzero(scores_arr > 0.5)[0])
+      score = np.sum(scores_arr[scores_arr > 0.5])
+      outputs.append(sent.SimpleSentence(words=output_actions,
+                                         idx=src.idx,
+                                         vocab=getattr(self.trg_reader, "vocab", None),
+                                         score=score,
+                                         output_procs=self.trg_reader.output_procs))
+    return outputs
 
   def set_trg_vocab(self, trg_vocab=None):
     """
@@ -172,3 +171,19 @@ class BowPredictor(models.ConditionedModel, models.GeneratorModel, Serializable)
   def get_nobp_state(self, state):
     output_state = state.rnn_state.output()
     return output_state
+
+
+class BowFScoreEvaluator(metrics.SentenceLevelEvaluator, Serializable):
+  yaml_tag = "!BowFScoreEvaluator"
+  @serializable_init
+  def __init__(self, case_sensitive=False, write_sentence_scores: Optional[str] = None) -> None:
+    super().__init__(write_sentence_scores=write_sentence_scores)
+    self.case_sensitive = case_sensitive
+
+  def evaluate_one_sent(self, ref:Sequence[str], hyp:Sequence[str]):
+    if not self.case_sensitive:
+      ref = [ref_i.lower() for ref_i in ref]
+      hyp = [hyp_i.lower() for hyp_i in hyp]
+    ref_set = set(ref)
+    hyp_set = set(hyp)
+    return metrics.FScore(true_pos=len(hyp_set & ref_set), false_neg=len(ref_set - hyp_set), false_pos=len(hyp_set - ref_set))
