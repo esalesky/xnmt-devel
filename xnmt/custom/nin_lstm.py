@@ -50,23 +50,22 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     assert layers > 0
     assert hidden_dim % 2 == 0
 
-    self.builder_layers = []
+    self.lstm_layers = []
     self.hidden_dim = hidden_dim
     self.stride=stride
 
-    self.builder_layers = self.add_serializable_component("builder_layers", builder_layers,
-                                                          lambda: self.init_builder_layers(layers, input_dim,
-                                                                                           hidden_dim, dropout,
-                                                                                           param_init_lstm,
-                                                                                           bias_init_lstm))
+    self.lstm_layers = self.add_serializable_component("builder_layers", builder_layers,
+                                                       lambda: self.init_lstm_layers(layers, input_dim,
+                                                                                     hidden_dim, dropout,
+                                                                                     param_init_lstm,
+                                                                                     bias_init_lstm))
 
     self.nin_layers = self.add_serializable_component("nin_layers", nin_layers,
                                                       lambda: self.init_nin_layers(layers, hidden_dim,
                                                                                    param_init_nin))
 
-  def init_builder_layers(self, layers, input_dim, hidden_dim, dropout, param_init_lstm,
-                          bias_init_lstm):
-    builder_layers = []
+  def init_lstm_layers(self, layers, input_dim, hidden_dim, dropout, param_init_lstm, bias_init_lstm):
+    lstm_layers = []
     f = recurrent.UniLSTMSeqTransducer(input_dim=input_dim,
                                        hidden_dim=hidden_dim / 2,
                                        dropout=dropout,
@@ -81,7 +80,7 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
                                                                                    Sequence) else param_init_lstm,
                                        bias_init=bias_init_lstm[0] if isinstance(bias_init_lstm,
                                                                                  Sequence) else bias_init_lstm)
-    builder_layers.append([f, b])
+    lstm_layers.append([f, b])
     for i in range(1, layers):
       f = recurrent.UniLSTMSeqTransducer(input_dim=hidden_dim,
                                          hidden_dim=hidden_dim / 2,
@@ -97,8 +96,8 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
                                                                                      Sequence) else param_init_lstm,
                                          bias_init=bias_init_lstm[i] if isinstance(bias_init_lstm,
                                                                                    Sequence) else bias_init_lstm)
-      builder_layers.append([f, b])
-    return builder_layers
+      lstm_layers.append([f, b])
+    return lstm_layers
 
   def init_nin_layers(self, layers, hidden_dim, param_init_nin):
     nin_layers = []
@@ -116,12 +115,12 @@ class NinBiLSTMTransducer(transducers.SeqTransducer, Serializable):
     self._final_states = None
 
   def get_final_states(self):
-    assert self._final_states is not None, "LSTMSeqTransducer.transduce() must be invoked before LSTMSeqTransducer.get_final_states()"
+    assert self._final_states is not None, "transduce() must be invoked before get_final_states()"
     return self._final_states
         
   def transduce(self, es: expression_seqs.ExpressionSequence) -> expression_seqs.ExpressionSequence:
 
-    for layer_i, (fb, bb) in enumerate(self.builder_layers):
+    for layer_i, (fb, bb) in enumerate(self.lstm_layers):
       fs = fb.transduce(es)
       bs = bb.transduce(expression_seqs.ReversedExpressionSequence(es))
       interleaved = []
