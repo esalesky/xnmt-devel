@@ -299,7 +299,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
 
     return dy.esum(losses)
 
-  def generate(self, src, idx, forced_trg_ids=None, **kwargs):
+  def generate(self, src, forced_trg_ids=None, **kwargs):
     event_trigger.start_sent(src)
     if isinstance(src, batchers.CompoundBatch):
       src = src.batches[0]
