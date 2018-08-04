@@ -12,6 +12,9 @@ class TestRunningConfig(unittest.TestCase):
   def test_bow(self):
     run.main(["test/custom/bow.yaml"])
 
+  def test_symmetric(self):
+    run.main(["test/custom/symmetric.yaml"])
+
   def tearDown(self):
     try:
       if os.path.isdir("test/tmp"):

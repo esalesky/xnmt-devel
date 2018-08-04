@@ -22,8 +22,9 @@ dyparams.from_args()
 # all Serializable objects must be imported here in order to be parsable
 # using the !Classname YAML syntax
 import xnmt.batchers
-import xnmt.custom.nin_lstm
 import xnmt.custom.bow
+import xnmt.custom.nin_lstm
+import xnmt.custom.symmetric_translator
 import xnmt.eval.metrics
 import xnmt.eval.tasks
 import xnmt.experiments

@@ -415,7 +415,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     dec_state.rnn_state = new_rnn_state
     rnn_output = dec_state.rnn_state.output()
     dec_state.context = self.attender.calc_context(rnn_output)
-    outputs = self.transform(dy.concatenate([rnn_output, dec_state.context]))
+    outputs = self.transform.transform(dy.concatenate([rnn_output, dec_state.context]))
     return outputs
 
   def _terminate_rnn(self, batch_i, pos, batched_word_id):
