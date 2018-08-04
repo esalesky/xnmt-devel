@@ -1,11 +1,10 @@
-import types
-
 import dynet as dy
 
-from xnmt import loss, loss_calculator, model_base
+from xnmt.models import base as models
+from xnmt import event_trigger, losses, loss_calculators
 from xnmt.persistence import Serializable, serializable_init
 
-class DualEncoderSimilarity(model_base.TrainableModel, Serializable, model_base.EventTrigger):
+class DualEncoderSimilarity(models.ConditionedModel, Serializable):
 
   yaml_tag = "!DualEncoderSimilarity"
 
@@ -19,7 +18,7 @@ class DualEncoderSimilarity(model_base.TrainableModel, Serializable, model_base.
 
   def calc_loss(self, src, trg, loss_calculator):
 
-    self.start_sent(src)
+    event_trigger.start_sent(src)
 
     src_embeddings = self.src_embedder.embed_sent(src)
     src_encodings = self.src_encoder(src_embeddings)
@@ -27,7 +26,7 @@ class DualEncoderSimilarity(model_base.TrainableModel, Serializable, model_base.
     trg_embeddings = self.trg_embedder.embed_sent(trg)
     trg_encodings = self.trg_encoder(trg_embeddings)
 
-    model_loss = loss.FactoredLossExpr()
+    model_loss = losses.FactoredLossExpr()
     model_loss.add_loss("dist", loss_calculator(src_encodings, trg_encodings))
 
     return model_loss
@@ -35,7 +34,7 @@ class DualEncoderSimilarity(model_base.TrainableModel, Serializable, model_base.
   def get_primary_loss(self): return "dist"
 
 
-class DistLoss(Serializable, loss_calculator.LossCalculator):
+class DistLoss(Serializable, loss_calculators.LossCalculator):
   yaml_tag = '!DistLoss'
 
   @serializable_init

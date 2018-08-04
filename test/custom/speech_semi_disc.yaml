@@ -1,0 +1,100 @@
+exp1-speech-nin: !Experiment
+  exp_global: !ExpGlobal
+    save_num_checkpoints: 2
+    default_layer_dim: 32
+    dropout: 0.4
+  preproc: !PreprocRunner
+    overwrite: False
+    tasks:
+    - !PreprocExtract
+      in_files:
+      - examples/data/LDC94S13A.yaml
+      out_files:
+      - examples/data/LDC94S13A.h5
+      specs: !MelFiltExtractor {}
+  model: !DefaultTranslator
+    src_embedder: !NoopEmbedder
+      emb_dim: 40
+    encoder: !ModularSeqTransducer
+      input_dim: 40
+      modules:
+      - !EntropyLossSeqTransducer
+        transducer: !NinBiLSTMTransducer
+          input_dim: 40
+          layers: 2
+          stride: 2
+          hidden_dim: 64
+        softmax_dim: 69
+        layer_dim: 32
+        mode: max
+        linear_layer: !Ref { name: trg_embedder }
+#      - !NetworkInNetworkBiLSTMTransducer
+#        layers: 2
+#        stride: 2
+#        nin_depth: 1
+#        input_dim: 40
+#        batch_norm: True
+#        nin_enabled: True
+#        nonlinearity: rectify
+#      - !SemiDiscreteSeqTransducer
+#        input_dim: 32
+#        output_dim: 64
+#        dropout: 0.5
+#        #gumbel: True
+#        vocab: !Vocab {vocab_file: examples/data/head.en.vocab}
+      - !BiLSTMSeqTransducer
+        input_dim: 64
+        layers: 1
+        hidden_dim: 64
+    attender: !MlpAttender
+      state_dim: 64
+      hidden_dim: 64
+      input_dim: 64
+    trg_embedder: !DenseWordEmbedder
+      _xnmt_id: trg_embedder
+      emb_dim: 64
+    decoder: !AutoRegressiveDecoder
+      rnn: !UniLSTMSeqTransducer
+        layers: 1
+      transform: !AuxNonLinear
+        output_dim: 512
+        activation: 'tanh'
+      bridge: !CopyBridge {}
+      scorer: !Softmax {}
+    src_reader: !H5Reader
+      transpose: True
+    trg_reader: !PlainTextReader
+      vocab: !Vocab {vocab_file: examples/data/head.en.vocab}
+  train: !SimpleTrainingRegimen
+    run_for_epochs: 2
+    batcher: !SrcBatcher
+      pad_src_to_multiple: 4
+      batch_size: 3
+    trainer: !AdamTrainer {}
+    src_file: examples/data/LDC94S13A.h5
+    trg_file: examples/data/LDC94S13A.char
+    dev_tasks:
+      - !LossEvalTask
+        src_file: examples/data/LDC94S13A.h5
+        ref_file: examples/data/LDC94S13A.char
+      - !AccuracyEvalTask
+        eval_metrics: cer,wer
+        src_file: examples/data/LDC94S13A.h5
+        ref_file: examples/data/LDC94S13A.char
+        hyp_file: examples/output/{EXP}.dev_hyp
+        inference: !AutoRegressiveInference
+          post_process: join-char
+  evaluate:
+    - !AccuracyEvalTask
+      eval_metrics: cer,wer
+      src_file: examples/data/LDC94S13A.h5
+      ref_file: examples/data/LDC94S13A.words
+      hyp_file: examples/output/{EXP}.test_hyp
+      inference: !AutoRegressiveInference
+        post_process: join-char
+    
+exp2-speech-load: !LoadSerialized
+  filename: examples/models/exp1-speech-nin.mod
+  overwrite:
+  - path: train.run_for_epochs
+    val: 0

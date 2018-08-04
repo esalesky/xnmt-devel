@@ -2,11 +2,12 @@ from typing import Optional
 
 import dynet as dy
 
-from xnmt import events, expression_sequence, loss, param_collection, transducer, transform
-import xnmt
+from xnmt.transducers import base as transducers
+from xnmt.modelparts import transforms
+from xnmt import events, expression_seqs, losses, param_collections, param_initializers, vocabs
 from xnmt.persistence import Serializable, serializable_init, bare, Ref
 
-class SemiDiscreteSeqTransducer(transducer.SeqTransducer, Serializable):
+class SemiDiscreteSeqTransducer(transducers.SeqTransducer, Serializable):
   """
   This implements a semi-discrete transducer as E*(softmax(Wx+b)).
 
@@ -32,9 +33,9 @@ class SemiDiscreteSeqTransducer(transducer.SeqTransducer, Serializable):
                linear_layer = None,
                vocab = None,
                gumbel = False,
-               param_init=Ref("exp_global.param_init", default=bare(xnmt.param_init.GlorotInitializer)),
-               bias_init=Ref("exp_global.bias_init", default=bare(xnmt.param_init.ZeroInitializer))):
-    param_col = param_collection.ParamManager.my_params(self)
+               param_init=Ref("exp_global.param_init", default=bare(param_initializers.GlorotInitializer)),
+               bias_init=Ref("exp_global.bias_init", default=bare(param_initializers.ZeroInitializer))):
+    param_col = param_collections.ParamManager.my_params(self)
     self.input_dim = input_dim
     if vocab:
       softmax_dim = len(vocab)
@@ -47,11 +48,11 @@ class SemiDiscreteSeqTransducer(transducer.SeqTransducer, Serializable):
 
     self.linear_layer = self.add_serializable_component("linear_layer",
                                                         linear_layer,
-                                                        lambda: transform.Linear(input_dim=self.softmax_dim,
-                                                                                 output_dim=self.output_dim,
-                                                                                 bias=False,
-                                                                                 param_init=param_init,
-                                                                                 bias_init=bias_init))
+                                                        lambda: transforms.Linear(input_dim=self.softmax_dim,
+                                                                                  output_dim=self.output_dim,
+                                                                                  bias=False,
+                                                                                  param_init=param_init,
+                                                                                  bias_init=bias_init))
 
     # self.p_W = param_col.add_parameters(dim=(softmax_dim, input_dim), init=param_init.initializer((softmax_dim, input_dim)))
     # self.p_b = param_col.add_parameters(dim=(softmax_dim), init=bias_init.initializer((softmax_dim,)))
@@ -64,7 +65,7 @@ class SemiDiscreteSeqTransducer(transducer.SeqTransducer, Serializable):
   def get_final_states(self):
     return self._final_states
 
-  def __call__(self, expr_seq):
+  def transduce(self, expr_seq: 'expression_seqs.ExpressionSequence'):
     """
     transduce the sequence
 
@@ -92,11 +93,11 @@ class SemiDiscreteSeqTransducer(transducer.SeqTransducer, Serializable):
         embedded = embedded + input_i
       output_exps.append(embedded)
 
-    self._final_states = [transducer.FinalTransducerState(main_expr=embedded)]
+    self._final_states = [transducers.FinalTransducerState(main_expr=embedded)]
 
-    return expression_sequence.ExpressionSequence(expr_list = output_exps, mask=expr_seq.mask)
+    return expression_seqs.ExpressionSequence(expr_list = output_exps, mask=expr_seq.mask)
 
-class EntropyLossSeqTransducer(transducer.SeqTransducer, Serializable):
+class EntropyLossSeqTransducer(transducers.SeqTransducer, Serializable):
   """
   This uses a sub-object to transduce the sequence, but adds a loss term that encourages discrete representations.
 
@@ -117,16 +118,16 @@ class EntropyLossSeqTransducer(transducer.SeqTransducer, Serializable):
   @events.register_xnmt_handler
   @serializable_init
   def __init__(self,
-               transducer:transducer.SeqTransducer,
+               transducer:transducers.SeqTransducer,
                input_dim:int=Ref("exp_global.default_layer_dim"),
                softmax_dim:int=Ref("exp_global.default_layer_dim"),
                layer_dim:int=Ref("exp_global.default_layer_dim"),
-               linear_layer:transform.Linear = None,
-               vocab:Optional[xnmt.vocab.Vocab] = None,
+               linear_layer:transforms.Linear = None,
+               vocab:Optional[vocabs.Vocab] = None,
                scale:float = 1.0,
                mode:str="entropy",
-               param_init:xnmt.param_init.ParamInitializer=Ref("exp_global.param_init", default=bare(xnmt.param_init.GlorotInitializer)),
-               bias_init:xnmt.param_init.ParamInitializer=Ref("exp_global.bias_init", default=bare(xnmt.param_init.ZeroInitializer))):
+               param_init:param_initializers.ParamInitializer=Ref("exp_global.param_init", default=bare(param_initializers.GlorotInitializer)),
+               bias_init:param_initializers.ParamInitializer=Ref("exp_global.bias_init", default=bare(param_initializers.ZeroInitializer))):
     self.transducer = transducer
     self.input_dim = input_dim
     if vocab:
@@ -138,18 +139,18 @@ class EntropyLossSeqTransducer(transducer.SeqTransducer, Serializable):
 
     self.linear_layer = self.add_serializable_component("linear_layer",
                                                         linear_layer,
-                                                        lambda: transform.Linear(input_dim=self.softmax_dim,
-                                                                                 output_dim=self.layer_dim,
-                                                                                 bias=False,
-                                                                                 param_init=param_init,
-                                                                                 bias_init=bias_init))
+                                                        lambda: transforms.Linear(input_dim=self.softmax_dim,
+                                                                                  output_dim=self.layer_dim,
+                                                                                  bias=False,
+                                                                                  param_init=param_init,
+                                                                                  bias_init=bias_init))
 
 
   def get_final_states(self):
     return self.transducer.get_final_states()
 
-  def __call__(self, expr_seq):
-    self.last_output = self.transducer(expr_seq)
+  def transduce(self, expr_seq):
+    self.last_output = self.transducer.transduce(expr_seq)
     return self.last_output
 
   @events.handle_xnmt_event
@@ -172,5 +173,5 @@ class EntropyLossSeqTransducer(transducer.SeqTransducer, Serializable):
     # loss_expr = loss_expr * (self.scale / seq_len)
     loss_expr = loss_expr * self.scale
 
-    return loss.FactoredLossExpr({"enc_entropy" : loss_expr })
+    return losses.FactoredLossExpr({"enc_entropy" : loss_expr })
 

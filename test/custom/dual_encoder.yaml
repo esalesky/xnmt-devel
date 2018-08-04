@@ -1,0 +1,114 @@
+exp1-multi_task_exp: !Experiment
+  exp_global: !ExpGlobal
+    model_file: examples/output/{EXP}.mod
+    log_file: examples/output/{EXP}.log
+    default_layer_dim: 64
+  train: !SameBatchMultiTaskTrainingRegimen
+    trainer: !AdamTrainer {}
+    tasks:
+    - !SimpleTrainingTask
+      kwargs: &task1
+        name: first_task
+        run_for_epochs: 3
+        batcher: !SrcBatcher
+          pad_src_to_multiple: 4
+          batch_size: 6
+        src_file: examples/data/LDC94S13A.h5
+        trg_file: examples/data/LDC94S13A.char
+        model: !DefaultTranslator
+          src_reader: !H5Reader
+            _xnmt_id: task1_src_reader
+            transpose: True
+          trg_reader: !PlainTextReader
+            vocab: !Vocab
+              _xnmt_id: trg_vocab
+              vocab_file: examples/data/head.en.vocab
+          src_embedder: !NoopEmbedder
+            _xnmt_id: task1_src_embedder
+            emb_dim: 40
+          encoder: !PyramidalLSTMSeqTransducer
+            _xnmt_id: task1_encoder
+            layers: 2
+            downsampling_method: concat
+            reduce_factor: 2
+            input_dim: 40
+            hidden_dim: 64
+          attender: !MlpAttender
+            state_dim: 64
+            hidden_dim: 64
+            input_dim: 64
+          trg_embedder: !SimpleWordEmbedder
+            emb_dim: 64
+            vocab: !Ref {name: trg_vocab}
+          decoder: !AutoRegressiveDecoder
+            rnn: !UniLSTMSeqTransducer
+              layers: 1
+              hidden_dim: 64
+            transform: !AuxNonLinear
+              output_dim: 512
+              activation: 'tanh'
+            bridge: !CopyBridge {}
+            scorer: !Softmax
+              vocab: !Ref {name: trg_vocab}
+          inference: !AutoRegressiveInference
+            batcher: !InOrderBatcher
+              pad_src_to_multiple: 4
+    - !SimpleTrainingTask
+      << : *task1
+      name: second_task
+      model: !DefaultTranslator
+        _xnmt_id: second_task_model
+        src_reader: !H5Reader
+          _xnmt_id: task2_src_reader
+          transpose: True
+        trg_reader: !PlainTextReader
+          vocab: !Ref {name: trg_vocab}
+        src_embedder: !NoopEmbedder
+          _xnmt_id: task2_src_embedder
+          emb_dim: 40
+        encoder: !PyramidalLSTMSeqTransducer
+          _xnmt_id: task2_encoder
+          layers: 2
+          downsampling_method: concat
+          reduce_factor: 2
+          input_dim: 40
+          hidden_dim: 64
+        attender: !MlpAttender
+          state_dim: 64
+          hidden_dim: 64
+          input_dim: 64
+        trg_embedder: !SimpleWordEmbedder
+          emb_dim: 64
+          vocab: !Ref {name: trg_vocab}
+        decoder: !AutoRegressiveDecoder
+          rnn: !UniLSTMSeqTransducer
+            layers: 1
+            hidden_dim: 64
+          transform: !AuxNonLinear
+            output_dim: 512
+            activation: 'tanh'
+          bridge: !CopyBridge {}
+          scorer: !Softmax
+            vocab: !Ref {name: trg_vocab}
+        inference: !AutoRegressiveInference
+          batcher: !InOrderBatcher
+            pad_src_to_multiple: 4
+    - !SimpleTrainingTask
+      << : *task1
+      name: task3
+      src_file: examples/data/LDC94S13A.h5
+      trg_file: examples/data/LDC94S13A_2.h5
+      loss_calculator: !DistLoss {}
+      batcher: !SrcBatcher
+        pad_src_to_multiple: 4
+        batch_size: 6
+      model: !DualEncoderSimilarity
+        src_embedder: !Ref { name: task1_src_embedder }
+        src_encoder: !Ref { name: task1_encoder }
+        src_reader: !Ref { name: task1_src_reader }
+        trg_embedder: !Ref { name: task2_src_embedder }
+        trg_encoder: !Ref { name: task2_encoder }
+        trg_reader: !Ref { name: task2_src_reader }
+
+exp2-finetune-model: !LoadSerialized
+  filename: examples/output/exp1-multi_task_exp.mod

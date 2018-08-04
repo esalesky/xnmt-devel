@@ -23,7 +23,9 @@ dyparams.from_args()
 # using the !Classname YAML syntax
 import xnmt.batchers
 import xnmt.custom.bow
+import xnmt.custom.dual_encoder
 import xnmt.custom.nin_lstm
+import xnmt.custom.semi_disc
 import xnmt.custom.symmetric_translator
 import xnmt.eval.metrics
 import xnmt.eval.tasks
