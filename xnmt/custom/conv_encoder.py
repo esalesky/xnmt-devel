@@ -6,7 +6,7 @@ import dynet as dy
 
 from xnmt import events, expression_seqs, norms, param_collections, param_initializers
 from xnmt.transducers import base as transducers
-from xnmt.nn import WeightNoise
+from xnmt.custom import regularizers
 from xnmt.persistence import Serializable, bare, serializable_init, Ref
 
 
@@ -70,7 +70,7 @@ class StridedConvSeqTransducer(transducers.SeqTransducer, Serializable):
     self.use_bn = batch_norm
     self.train = True
     self.transpose = transpose
-    self.weight_noise = WeightNoise(weight_noise)
+    self.weight_noise = regularizers.WeightNoise(weight_noise)
 
     self.bn_layers = []
     self.filters_layers = []
@@ -288,7 +288,7 @@ class PoolingConvSeqTransducer(transducers.SeqTransducer, Serializable):
 
     mask_out = es.mask.lin_subsampled(trg_len=cnn_layer.dim()[0][0])
     if self.output_tensor:
-      return expression_seqs.(tensor_expr=cnn_layer, mask=mask_out)
+      return expression_seqs.ExpressionSequence(tensor_expr=cnn_layer, mask=mask_out)
     else:
       cnn_out = dy.reshape(cnn_layer, (cnn_layer.dim()[0][0], cnn_layer.dim()[0][1] * cnn_layer.dim()[0][2]),
                            batch_size=batch_size)
