@@ -3,10 +3,12 @@ from typing import Optional, Sequence, Union
 import numpy as np
 import dynet as dy
 
-from xnmt import attender, batcher, bridge, embedder, expression_sequence, events, inference, input_reader, lstm, \
-  loss, model_base, reports, scorer, sent, transducer, vocab
-import xnmt.transform
+from xnmt import batchers, expression_seqs, event_trigger, events, inferences, input_readers, losses, reports, sent, \
+  vocabs
+from xnmt.modelparts import attenders, bridges, embedders, scorers, transforms
+from xnmt.models import base as models
 from xnmt.persistence import Serializable, serializable_init, bare, Ref
+from xnmt.transducers import recurrent, base as transducers
 
 class SymmetricDecoderState(object):
   def __init__(self, rnn_state: dy.Expression = None, context: dy.Expression = None, out_prob: dy.Expression = None):
@@ -15,8 +17,8 @@ class SymmetricDecoderState(object):
     self.out_prob = out_prob
 
 
-class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel, Serializable, model_base.EventTrigger,
-                          transducer.SeqTransducer, reports.Reportable):
+class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serializable, transducers.SeqTransducer,
+                          reports.Reportable):
   """
   Args:
     src_reader:
@@ -55,17 +57,17 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
   @events.register_xnmt_handler
   @serializable_init
   def __init__(self,
-               trg_embedder:embedder.DenseWordEmbedder,
-               src_reader: input_reader.InputReader = None,
-               trg_reader: input_reader.InputReader = None,
-               src_embedder=bare(embedder.SimpleWordEmbedder),
-               encoder=bare(lstm.BiLSTMSeqTransducer),
-               attender=bare(attender.MlpAttender),
-               dec_lstm=bare(lstm.UniLSTMSeqTransducer),
-               bridge: bridge.Bridge = bare(bridge.CopyBridge),
-               transform: xnmt.transform.Transform = bare(xnmt.transform.AuxNonLinear),
-               scorer: scorer.Scorer = bare(scorer.Softmax),
-               inference=bare(inference.IndependentOutputInference),
+               trg_embedder:embedders.DenseWordEmbedder,
+               src_reader: input_readers.InputReader = None,
+               trg_reader: input_readers.InputReader = None,
+               src_embedder=bare(embedders.SimpleWordEmbedder),
+               encoder=bare(recurrent.BiLSTMSeqTransducer),
+               attender=bare(attenders.MlpAttender),
+               dec_lstm=bare(recurrent.UniLSTMSeqTransducer),
+               bridge: bridges.Bridge = bare(bridges.CopyBridge),
+               transform: transforms.Transform = bare(transforms.AuxNonLinear),
+               scorer: scorers.Scorer = bare(scorers.Softmax),
+               inference=bare(inferences.IndependentOutputInference),
                max_dec_len: int = 350,
                mode: Optional[str] = None,
                mode_translate: Optional[str] = None,
@@ -104,7 +106,7 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
     if self.split_dual:
       assert len(self.split_dual)==2 and max(self.split_dual) <= 1.0 and min(self.split_dual) >= 0.0
       self.split_dual_proj = self.add_serializable_component("split_dual_proj", split_dual_proj,
-                                                             lambda: xnmt.transform.Linear(input_dim=self.dec_lstm.input_dim*2,
+                                                             lambda: transforms.Linear(input_dim=self.dec_lstm.input_dim*2,
                                                                                            output_dim=self.dec_lstm.input_dim))
     self.compute_report = compute_report
 
@@ -125,7 +127,7 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
     rnn_state = rnn_state.set_s(self.bridge.decoder_init(enc_final_states))
     zeros = dy.zeros(self.dec_lstm.input_dim, batch_size=batch_size)
 
-    ss = batcher.mark_as_batch([vocab.Vocab.SS] * batch_size)
+    ss = batchers.mark_as_batch([vocabs.Vocab.SS] * batch_size)
     first_input = self.trg_embedder.embed(ss)
     self._chosen_rnn_inputs.append(first_input)
     rnn_state = rnn_state.add_input(first_input)
@@ -150,7 +152,7 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
       first_state = SymmetricDecoderState(rnn_state=current_state.rnn_state, context=current_state.context)
     batch_size = x.dim()[1]
     done = [False] * batch_size
-    out_mask = batcher.Mask(np_arr=np.zeros((batch_size, self.max_dec_len)))
+    out_mask = batchers.Mask(np_arr=np.zeros((batch_size, self.max_dec_len)))
     out_mask.np_arr.flags.writeable = True
     # teacher / split mode: unfold guided by reference targets
     #  -> feed everything up unto (except) the last token back into the LSTM
@@ -235,81 +237,78 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
                                                              vocab=self.cur_src.batches[1][0].vocab,
                                                              output_procs=self.cur_src.batches[1][0].output_procs),
                              "symm_ref": self.cur_src.batches[1][0] if isinstance(self.cur_src,
-                                                                                  batcher.CompoundBatch) else None})
+                                                                                  batchers.CompoundBatch) else None})
     # prepare final outputs
     for layer_i in range(len(current_state.rnn_state.h())):
-      self._final_states.append(transducer.FinalTransducerState(main_expr=current_state.rnn_state.h()[layer_i],
+      self._final_states.append(transducers.FinalTransducerState(main_expr=current_state.rnn_state.h()[layer_i],
                                                          cell_expr=current_state.rnn_state._c[layer_i]))
     out_mask.np_arr.flags.writeable = False
-    return expression_sequence.ExpressionSequence(expr_list=output_states, mask=out_mask)
+    return expression_seqs.ExpressionSequence(expr_list=output_states, mask=out_mask)
 
   def _batch_max_action(self, batch_size, current_state, pos):
     if pos == 0:
       return None
     elif batch_size > 1:
-      return batcher.mark_as_batch(np.argmax(current_state.out_prob.npvalue(), axis=0))
+      return batchers.mark_as_batch(np.argmax(current_state.out_prob.npvalue(), axis=0))
     else:
-      return batcher.mark_as_batch([np.argmax(current_state.out_prob.npvalue(), axis=0)])
+      return batchers.mark_as_batch([np.argmax(current_state.out_prob.npvalue(), axis=0)])
 
   def _batch_ref_action(self, pos):
     ref_action = []
     for src_sent in self.cur_src.batches[1]:
       if src_sent[pos] is None:
-        ref_action.append(vocab.Vocab.ES)
+        ref_action.append(vocabs.Vocab.ES)
       else:
         ref_action.append(src_sent[pos])
-    ref_action = batcher.mark_as_batch(ref_action)
+    ref_action = batchers.mark_as_batch(ref_action)
     return ref_action
 
   def get_final_states(self):
     return self._final_states
 
-  def calc_loss(self, src, trg, loss_calculator=None):
-    self.start_sent(src)
-    if isinstance(src, batcher.CompoundBatch):
+  def calc_nll(self, src, trg):
+    event_trigger.start_sent(src)
+    if isinstance(src, batchers.CompoundBatch):
       src, _ = src.batches
     initial_state = self._encode_src(src)
 
     dec_state = initial_state
-    trg_mask = trg.mask if batcher.is_batched(trg) else None
+    trg_mask = trg.mask if batchers.is_batched(trg) else None
     losses = []
     seq_len = trg.sent_len()
-    if batcher.is_batched(src):
+    if batchers.is_batched(src):
       for j, single_trg in enumerate(trg):
         assert single_trg.sent_len() == seq_len  # assert consistent length
         assert 1 == len([i for i in range(seq_len) if (trg_mask is None or trg_mask.np_arr[j, i] == 0)
-                         and single_trg[i] == vocab.Vocab.ES])  # assert exactly one unmasked ES token
+                         and single_trg[i] == vocabs.Vocab.ES])  # assert exactly one unmasked ES token
     prev_ref_word = None
     for i in range(seq_len):
-      if not batcher.is_batched(trg):
+      if not batchers.is_batched(trg):
         ref_word = trg[i]
       else:
-        ref_word = batcher.mark_as_batch([single_trg[i] for single_trg in trg])
+        ref_word = batchers.mark_as_batch([single_trg[i] for single_trg in trg])
       word_loss = self.calc_loss_one_step(dec_state=dec_state,
                                                      batch_size=ref_word.batch_size(),
                                                      ref_action=ref_word,
                                                      prev_ref_action=prev_ref_word,
                                                      mode=self.mode_translate)
-      if batcher.is_batched(src) and trg_mask is not None:
+      if batchers.is_batched(src) and trg_mask is not None:
         word_loss = trg_mask.cmult_by_timestep_expr(word_loss, i, inverse=True)
       losses.append(word_loss)
       prev_ref_word = ref_word
 
-    loss_expr = dy.esum(losses)
-    model_loss = loss.FactoredLossExpr({"mle": loss_expr})
-
-    return model_loss
+    return dy.esum(losses)
 
   def generate(self, src, idx, forced_trg_ids=None, **kwargs):
-    self.start_sent(src)
-    if isinstance(src, batcher.CompoundBatch):
+    event_trigger.start_sent(src)
+    if isinstance(src, batchers.CompoundBatch):
       src = src.batches[0]
 
     outputs = []
 
     batch_size = src.batch_size()
-    score = batcher.ListBatch([[] for _ in range(batch_size)])
-    words = batcher.ListBatch([[] for _ in range(batch_size)])
+    score = batchers.ListBatch([[] for _ in range(batch_size)])
+    words = batchers.ListBatch([[] for _ in range(batch_size)])
     done = [False] * batch_size
     initial_state = self._encode_src(src)
     current_state = initial_state
@@ -318,12 +317,12 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
       prev_ref_action = None
       if pos > 0 and self.mode_translate != "context":
         if forced_trg_ids is not None:
-          prev_ref_action = batcher.mark_as_batch(
+          prev_ref_action = batchers.mark_as_batch(
             [forced_trg_ids[batch_i][pos - 1] for batch_i in range(batch_size)])
         elif batch_size > 1:
-          prev_ref_action = batcher.mark_as_batch(np.argmax(current_state.out_prob.npvalue(), axis=0))
+          prev_ref_action = batchers.mark_as_batch(np.argmax(current_state.out_prob.npvalue(), axis=0))
         else:
-          prev_ref_action = batcher.mark_as_batch([np.argmax(current_state.out_prob.npvalue(), axis=0)])
+          prev_ref_action = batchers.mark_as_batch([np.argmax(current_state.out_prob.npvalue(), axis=0)])
 
       logsoft = self.generate_one_step(dec_state=current_state,
                                        batch_size=batch_size,
@@ -340,7 +339,7 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
         batched_word_id = [forced_trg_batch_elem[pos] for forced_trg_batch_elem in forced_trg_ids]
       for batch_i in range(batch_size):
         if done[batch_i]:
-          batch_word = vocab.Vocab.ES
+          batch_word = vocabs.Vocab.ES
           batch_score = 0.0
         else:
           batch_word = batched_word_id[batch_i]
@@ -374,15 +373,15 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
   def calc_loss_one_step(self,
                          dec_state: SymmetricDecoderState,
                          batch_size: int,
-                         prev_ref_action: Optional[batcher.Batch],
+                         prev_ref_action: Optional[batchers.Batch],
                          mode: str,
-                         ref_action: Optional[batcher.Batch] = None) -> Optional[dy.Expression]:
+                         ref_action: Optional[batchers.Batch] = None) -> Optional[dy.Expression]:
     outputs = self._unfold_one_step(dec_state=dec_state, batch_size=batch_size, mode=mode, mask=None, cur_step=None,
                                     prev_ref_action=prev_ref_action)
     if mode not in ["teacher", "split"]:
       dec_state.out_prob = self.scorer.calc_probs(outputs)
     if ref_action:
-      word_loss = self.scorer.calc_loss(outputs, batcher.mark_as_batch(ref_action))
+      word_loss = self.scorer.calc_loss(outputs, batchers.mark_as_batch(ref_action))
       return word_loss
     else: return None
 
@@ -390,9 +389,9 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
                         dec_state: SymmetricDecoderState,
                         batch_size: int,
                         mode: str,
-                        mask: Optional[batcher.Mask] = None,
+                        mask: Optional[batchers.Mask] = None,
                         cur_step: Optional[int] = None,
-                        prev_ref_action: Optional[batcher.Batch] = None) -> dy.Expression:
+                        prev_ref_action: Optional[batchers.Batch] = None) -> dy.Expression:
     outputs = self._unfold_one_step(dec_state=dec_state, batch_size=batch_size, mode=mode, mask=mask, cur_step=cur_step,
                                     prev_ref_action=prev_ref_action)
     if mode in ["expected", "argmax", "argmax_st", "teacher", "split"]:
@@ -423,7 +422,7 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
     if self.unfold_until == "supervised":
       return pos >= self.cur_src.batches[1][batch_i].len_unpadded()
     elif self.unfold_until == "eos":
-      return batched_word_id[batch_i] == vocab.Vocab.ES
+      return batched_word_id[batch_i] == vocabs.Vocab.ES
     else:
       raise ValueError(f"unknown value '{self.unfold_until}' for unfold_until")
 
@@ -461,4 +460,4 @@ class SymmetricTranslator(model_base.ConditionedModel, model_base.GeneratorModel
       loss_dict["symm_transd_loss"] = loss_expr
     if self.split_reg_penalty_expr is not None:
       loss_dict["symm_transd_reg_penalty"] = self.split_reg_penalty_expr
-    else: return loss.FactoredLossExpr(loss_dict)
+    else: return losses.FactoredLossExpr(loss_dict)
