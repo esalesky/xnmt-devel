@@ -18,7 +18,8 @@ def main():
 
     for sent_no, key in enumerate(npz_keys):
       features = npz_file[key]
-      hf.create_dataset(str(key), data=features)
+      assert key.startswith("arr_")
+      hf.create_dataset(str(int(key[4:])), data=features)
 
   npz_file.close()
 
