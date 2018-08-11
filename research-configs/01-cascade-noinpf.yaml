@@ -46,7 +46,6 @@ exp0001a.1: !Experiment
             input_dim: 40
             hidden_dim: 512
           attender: !MlpAttender
-            _xnmt_id: task1_attender
             hidden_dim: 128
           trg_embedder: !SimpleWordEmbedder
             _xnmt_id: asr_trg_embedder
@@ -57,7 +56,6 @@ exp0001a.1: !Experiment
               vocab_file: '{VOCAB}/en-de-es-fr.lc.no-numbers-punct.vocab'
             fix_norm: 1
           decoder: !AutoRegressiveDecoder
-            _xnmt_id: asr_decoder
             input_feeding: False #True
             scorer: !Softmax
               label_smoothing: 0.1
@@ -106,22 +104,20 @@ exp0001a.1: !Experiment
           encoder: !BiLSTMSeqTransducer
             _xnmt_id: mt_encoder
             layers: 2
-          attender: !Ref { name: task1_attender }
+          attender: !MlpAttender
+            hidden_dim: 128
           trg_embedder: !SimpleWordEmbedder
-            _xnmt_id: task1_trg_embedder
             emb_dim: 64
             word_dropout: 0.1
             vocab: !Ref { name: char_vocab }
             fix_norm: 1
           decoder: !AutoRegressiveDecoder
-            _xnmt_id: task1_decoder
             input_feeding: True
             scorer: !Softmax
               label_smoothing: 0.1
               vocab: !Ref { name: char_vocab }
             bridge: !CopyBridge {}
             rnn: !UniLSTMSeqTransducer
-              _xnmt_id: task1_dec_lstm
               layers: 1
             transform: !AuxNonLinear {}
           src_reader: !PlainTextReader
