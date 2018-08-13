@@ -157,8 +157,9 @@ exp0001a.1: !Experiment
       ref_file: '{DATA_EN}/fisher_test.en.0_filt.proc.noid.words'
       hyp_file: '{EXP_DIR}/hyp/{EXP}.eval_casc_hyp'
       model: !CascadeGenerator
-        generator1: !Ref { path: train.tasks.0.model }
-        generator2: !Ref { path: train.tasks.1.model }
+        generators:
+        - !Ref { path: train.tasks.0.model }
+        - !Ref { path: train.tasks.1.model }
       inference: !CascadeInference
         steps:
         - !AutoRegressiveInference
@@ -169,10 +170,6 @@ exp0001a.1: !Experiment
               max_src_len: 1500
               search_strategy: !BeamSearch
                 max_len: 350
-                beam_size: 15
-                len_norm: !PolynomialNormalization
-                  apply_during_search: true
-                  m: 1.5
         - !AutoRegressiveInference
               batcher: !InOrderBatcher { batch_size: 1 }
               post_process: join-char

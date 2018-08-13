@@ -84,6 +84,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     if mode_translate or mode_transduce: assert mode_translate and mode_transduce
     assert mode_translate != "split"
     self.src_embedder = src_embedder
+    self.trg_embedder = trg_embedder
     self.encoder = encoder
     self.attender = attender
     self.dec_lstm = dec_lstm
