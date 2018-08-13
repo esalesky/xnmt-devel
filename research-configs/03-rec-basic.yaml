@@ -1,0 +1,224 @@
+# basic reconstruction model (only separate data)
+exp0003a.1: !Experiment
+  exp_global: !ExpGlobal
+    dropout: 0.3
+    default_layer_dim: 512
+    save_num_checkpoints: 3
+    placeholders:
+#      DATA: /project/iwslt2015b/project/nmt-audio/data/es
+#      DATA_EN: /project/iwslt2015b/project/nmt-audio/data/es-en
+#      VOCAB: /project/iwslt2015b/project/nmt-audio/data/vocab
+#      SAMPLE_TRAIN_SENTS_: &SAMPLE_TRAIN_SENTS 69360
+#      MAX_NUM_TRAIN_SENTS_: &MAX_NUM_TRAIN_SENTS ~
+#      DEV_EVERY_: &DEV_EVERY 69360
+#      RUN_FOR_EPOCHS_: &RUN_FOR_EPOCHS 500
+      DATA: examples/data-custom
+      DATA_EN: examples/data-custom
+      VOCAB: examples/data-custom
+      SAMPLE_TRAIN_SENTS_: &SAMPLE_TRAIN_SENTS 5
+      MAX_NUM_TRAIN_SENTS_: &MAX_NUM_TRAIN_SENTS 10
+      DEV_EVERY_: &DEV_EVERY 0
+      RUN_FOR_EPOCHS_: &RUN_FOR_EPOCHS 1
+  train: !SameBatchMultiTaskTrainingRegimen
+    trainer: !AdamTrainer
+      alpha: 0.0005
+      skip_noisy: True
+    tasks:
+    - !SimpleTrainingTask
+      kwargs: &task1
+        name: '{EXP}.st'
+        run_for_epochs: *RUN_FOR_EPOCHS
+        max_num_train_sents: *MAX_NUM_TRAIN_SENTS
+        lr_decay: 0.5
+        lr_decay_times: 1
+        patience: 5
+        initial_patience: 10
+        dev_every: *DEV_EVERY
+        restart_trainer: True
+        batcher: !WordSrcBatcher
+          avg_batch_size: 24
+          pad_src_to_multiple: 4
+        max_src_len: 1500
+        max_trg_len: 350
+        src_file: ['{DATA_EN}/fisher_cmvn_fbank40_train.h5', '{DATA}/fisher_train.es_filt.proc.noid']
+        trg_file: '{DATA_EN}/fisher_train.en_filt.proc.noid'
+        #sample_train_sents: 69360
+        model: !DefaultTranslator
+          src_embedder: !NoopEmbedder
+            emb_dim: 40
+          encoder: !SymmetricTranslator
+            _xnmt_id: asr_symmetric_translator
+            mode: teacher
+            src_embedder: !NoopEmbedder
+              emb_dim: 40
+            trg_embedder: !DenseWordEmbedder
+              _xnmt_id: mt_src_embedder
+              emb_dim: 512
+              vocab: !Ref { name: char_vocab }
+            encoder: !ZhangSeqTransducer
+              input_dim: 40
+              hidden_dim: 512
+            attender: !MlpAttender
+              hidden_dim: 128
+            dec_lstm: !UniLSTMSeqTransducer
+              _xnmt_id: mt_encoder_lstm
+              layers: 1
+            scorer: !Softmax
+              label_smoothing: 0.1
+              vocab: !Ref { name: char_vocab }
+            bridge: !CopyBridge {}
+            transform: !AuxNonLinear {}
+            src_reader: !H5Reader
+              transpose: y
+            trg_reader: !PlainTextReader
+              vocab: !Vocab
+                _xnmt_id: char_vocab
+                vocab_file: '{VOCAB}/en-de-es-fr.lc.no-numbers-punct.vocab'
+          attender: !MlpAttender
+            _xnmt_id: mt_attender
+            hidden_dim: 128
+          decoder: !AutoRegressiveDecoder
+            _xnmt_id: mt_decoder
+            input_feeding: True
+            scorer: !Softmax
+              label_smoothing: 0.1
+              vocab: !Ref { name: char_vocab }
+            bridge: !CopyBridge {}
+            rnn: !UniLSTMSeqTransducer
+              layers: 1
+            transform: !AuxNonLinear {}
+          trg_embedder: !SimpleWordEmbedder
+            _xnmt_id: mt_trg_embedder
+            emb_dim: 64
+            word_dropout: 0.1
+            vocab: !Ref { name: char_vocab }
+            fix_norm: 1
+          src_reader: !CompoundReader
+            _xnmt_id: compound_src_reader
+            readers:
+            - !H5Reader
+              transpose: y
+            - !PlainTextReader
+              vocab: !Ref { name: char_vocab }
+            vocab: !Ref { name: char_vocab }
+          trg_reader: !PlainTextReader
+            vocab: !Ref { name: char_vocab }
+        dev_tasks:
+          - !AccuracyEvalTask
+            eval_metrics: bleu
+            src_file: ['{DATA_EN}/fisher_cmvn_fbank40_dev.h5', '{DATA}/fisher_dev.es_filt.proc.noid']
+            ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid.words'
+            hyp_file: '{EXP_DIR}/hyp/{EXP}.dev_slt_hyp'
+            model: !Ref { path: train.tasks.0.model }
+            inference: !AutoRegressiveInference
+              batcher: !InOrderBatcher
+                _xnmt_id: inference_batcher_audio
+                pad_src_to_multiple: 4
+              post_process: join-char
+              max_src_len: 1500
+              search_strategy: !BeamSearch
+                max_len: 350
+                beam_size: 15
+                len_norm: !PolynomialNormalization
+                  apply_during_search: true
+                  m: 1.5
+          - !LossEvalTask
+            max_src_len: 1500
+            src_file: ['{DATA_EN}/fisher_cmvn_fbank40_dev.h5', '{DATA}/fisher_dev.es_filt.proc.noid']
+            ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid'
+            model: !Ref { path: train.tasks.0.model }
+            batcher: !Ref { name: inference_batcher_audio }
+    - !SimpleTrainingTask
+      kwargs:
+        << : *task1
+        name: '{EXP}.asr'
+        max_src_len: 1500
+        max_trg_len: 350
+        src_file: '{DATA_EN}/fisher_cmvn_fbank40_train.h5'
+        trg_file: '{DATA}/fisher_train.es_filt.proc.noid'
+        max_num_train_sents: *MAX_NUM_TRAIN_SENTS
+        sample_train_sents: *SAMPLE_TRAIN_SENTS
+        model: !Ref { name: asr_symmetric_translator }
+        dev_tasks:
+          - !AccuracyEvalTask
+            eval_metrics: wer,cer
+            src_file: '{DATA_EN}/fisher_cmvn_fbank40_dev.h5'
+            ref_file: '{DATA}/fisher_dev.es_filt.proc.noid.words'
+            hyp_file: '{EXP_DIR}/hyp/{EXP}.dev_asr_hyp'
+            model: !Ref { name: asr_symmetric_translator }
+            inference: !IndependentOutputInference
+              batcher: !Ref { name: inference_batcher_audio }
+              post_process: join-char
+              max_src_len: 1500
+          - !LossEvalTask
+            max_src_len: 1500
+            src_file: '{DATA_EN}/fisher_cmvn_fbank40_dev.h5'
+            ref_file: '{DATA}/fisher_dev.es_filt.proc.noid'
+            model: !Ref { name: asr_symmetric_translator }
+            batcher: !Ref { name: inference_batcher_audio }
+    - !SimpleTrainingTask
+      kwargs:
+        << : *task1
+        name: '{EXP}.mt'
+        max_src_len: 350
+        max_trg_len: 350
+        src_file: '{DATA}/fisher_train.es_filt.proc.noid'
+        trg_file: '{DATA_EN}/fisher_train.en_filt.proc.noid'
+        max_num_train_sents: *MAX_NUM_TRAIN_SENTS
+        sample_train_sents: *SAMPLE_TRAIN_SENTS
+        batcher: !WordSrcBatcher
+          avg_batch_size: 40
+        model: !DefaultTranslator
+          src_embedder: !Ref { name: mt_src_embedder }
+          encoder: !Ref { name: mt_encoder_lstm }
+          attender: !Ref { name: mt_attender }
+          decoder: !Ref { name: mt_decoder }
+          trg_embedder: !Ref { name: mt_trg_embedder }
+          src_reader: !PlainTextReader
+            vocab: !Ref { name: char_vocab }
+          trg_reader: !PlainTextReader
+            vocab: !Ref { name: char_vocab }
+        dev_tasks:
+          - !AccuracyEvalTask
+            eval_metrics: bleu
+            src_file: '{DATA}/fisher_dev.es_filt.proc.noid'
+            ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid.words'
+            hyp_file: '{EXP_DIR}/hyp/{EXP}.dev_mt_hyp'
+            model: !Ref { path: train.tasks.2.model }
+            inference: !AutoRegressiveInference
+              batcher: !InOrderBatcher
+                _xnmt_id: inference_batcher_text
+              post_process: join-char
+              max_src_len: 1500
+              # no beam search for auxiliary tasks
+              search_strategy: !BeamSearch
+                max_len: 350
+          - !LossEvalTask
+            max_src_len: 1500
+            src_file: '{DATA}/fisher_dev.es_filt.proc.noid'
+            ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid'
+            model: !Ref { path: train.tasks.2.model }
+            batcher: !Ref { name: inference_batcher_text }
+  evaluate:
+    - !AccuracyEvalTask
+      eval_metrics: bleu
+      src_file: ['{DATA_EN}/fisher_cmvn_fbank40_test.h5', '{DATA}/fisher_test.es_filt.proc.noid']
+      ref_file: '{DATA_EN}/fisher_test.en.0_filt.proc.noid.words'
+      hyp_file: '{EXP_DIR}/hyp/{EXP}.eval_slt_hyp'
+      model: !Ref { path: train.tasks.0.model }
+      inference: !AutoRegressiveInference
+        batcher: !Ref { name: inference_batcher_audio }
+        post_process: join-char
+        max_src_len: 1500
+        search_strategy: !BeamSearch
+          beam_size: 15
+          max_len: 350
+          len_norm: !PolynomialNormalization
+            apply_during_search: true
+            m: 1.5
+    - !LossEvalTask
+      max_src_len: 1500
+      src_file: ['{DATA_EN}/fisher_cmvn_fbank40_test.h5', '{DATA}/fisher_test.es_filt.proc.noid']
+      ref_file: '{DATA_EN}/fisher_test.en.0_filt.proc.noid'
+      model: !Ref { path: train.tasks.0.model }
+      batcher: !Ref { name: inference_batcher_audio }
