@@ -270,9 +270,12 @@ class Ref(Serializable):
     """Return name, or ``None`` if this is not a named reference"""
     return getattr(self, "name", None)
 
-  def get_path(self) -> 'Path':
+  def get_path(self) -> Optional['Path']:
     """Return path, or ``None`` if this is a named reference"""
-    return getattr(self, "path", None)
+    if getattr(self, "path", None):
+      if isinstance(self.path, str): self.path = Path(self.path)
+      return self.path
+    return None
 
   def is_required(self) -> bool:
     """Return ``True`` iff there exists no default value and it is mandatory that this reference be resolved."""
@@ -547,9 +550,6 @@ def _get_child_serializable(node, name):
     if not hasattr(node, name):
       raise PathError(f"{node} has no child named {name}")
     return getattr(node, name)
-  # if not hasattr(node, name):
-  #   raise PathError(f"{node} has no child named {name}")
-  # return getattr(node, name)
 
 
 @singledispatch
@@ -1242,16 +1242,13 @@ class _YamlDeserializer(object):
       for shared_param_path in shared_param_set:
         try:
           new_shared_val = _get_descendant(root, shared_param_path)
-          # print('found {} = {}'.format(shared_param_path, new_shared_val))
         except PathError:
-          # print('found not {}'.format(shared_param_path))
           continue
         for _, child_of_shared_param in _traverse_tree(new_shared_val, include_root=False):
           if isinstance(child_of_shared_param, Serializable):
             raise ValueError(f"{path} shared params {shared_param_set} contains Serializable sub-object {child_of_shared_param} which is not permitted")
         if not isinstance(new_shared_val, Ref):
           shared_val_choices.add(new_shared_val)
-      # print('shared set {} == {}'.format(shared_param_set, shared_val_choices))
       if len(shared_val_choices)>1:
         logger.warning(f"inconsistent shared params at {path} for {shared_param_set}: {shared_val_choices}; Ignoring these shared parameters.")
       elif len(shared_val_choices)==1:
@@ -1335,7 +1332,7 @@ def _resolve_serialize_refs(root):
       xnmt.resolved_serialize_params[id(node)] = node.serialize_params
     elif isinstance(node, collections.abc.MutableMapping):
       xnmt.resolved_serialize_params[id(node)] = dict(node)
-    elif isinstance(node, collections.abc.Sequence):
+    elif isinstance(node, collections.abc.MutableSequence):
       xnmt.resolved_serialize_params[id(node)] = list(node)
   if not ParamManager.param_col.all_subcol_owners <= all_serializable:
     raise RuntimeError(f"Not all registered DyNet parameter collections written out. "
@@ -1345,7 +1342,7 @@ def _resolve_serialize_refs(root):
   refs_inserted_at = set()
   refs_inserted_to = set()
   for path_to, node in _traverse_serializable(root):
-    if not refs_inserted_at & path_to.ancestors() and not refs_inserted_at & path_to.ancestors():
+    if not refs_inserted_at & path_to.ancestors():
       if isinstance(node, Serializable):
         for path_from, matching_node in _traverse_serializable(root):
           if not path_from in refs_inserted_to:
