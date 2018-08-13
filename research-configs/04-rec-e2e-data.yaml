@@ -1,4 +1,4 @@
-# basic reconstruction model (only separate data)
+# basic reconstruction model (include end2end data and transducer_loss)
 exp0004a.1: !Experiment
   exp_global: !ExpGlobal
     dropout: 0.3
@@ -49,6 +49,7 @@ exp0004a.1: !Experiment
           encoder: !SymmetricTranslator
             _xnmt_id: asr_symmetric_translator
             mode: teacher
+            transducer_loss: True
             src_embedder: !NoopEmbedder
               emb_dim: 40
             trg_embedder: !DenseWordEmbedder
