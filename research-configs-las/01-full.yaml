@@ -1,0 +1,108 @@
+# full-featured ASR model
+exp0001a.1: !Experiment
+  exp_global: !ExpGlobal
+    dropout: 0.3
+    default_layer_dim: 512
+    save_num_checkpoints: 3
+    loss_comb_method: avg
+    placeholders:
+#      DATA: /project/data-audio/tedlium-multi/parallel/en
+#      VOCAB: /project/data-audio/tedlium-multi/parallel/en/wsj-vocab
+#      MAX_NUM_TRAIN_SENTS_: &MAX_NUM_TRAIN_SENTS ~
+#      DEV_EVERY_: &DEV_EVERY 0
+#      RUN_FOR_EPOCHS_: &RUN_FOR_EPOCHS 500
+      DATA: examples/data-custom
+      VOCAB: research-configs-las/wsj-vocab
+      MAX_NUM_TRAIN_SENTS_: &MAX_NUM_TRAIN_SENTS 10
+      DEV_EVERY_: &DEV_EVERY 0
+      RUN_FOR_EPOCHS_: &RUN_FOR_EPOCHS 1
+  model: !DefaultTranslator
+    src_embedder: !NoopEmbedder
+      emb_dim: 40
+    encoder: !ZhangSeqTransducer
+      input_dim: 40
+      hidden_dim: 512
+    attender: !MlpAttender
+      hidden_dim: 128
+    trg_embedder: !SimpleWordEmbedder
+      _xnmt_id: asr_trg_embedder
+      emb_dim: 64
+      word_dropout: 0.1
+      vocab: !Vocab
+        _xnmt_id: char_vocab
+        vocab_file: '{VOCAB}'
+      fix_norm: 1
+    decoder: !AutoRegressiveDecoder
+      input_feeding: True
+      scorer: !Softmax
+        label_smoothing: 0.1
+        vocab: !Ref { name: char_vocab }
+      bridge: !CopyBridge {}
+      transform: !AuxNonLinear {}
+    src_reader: !H5Reader
+      transpose: y
+      feat_to: 40
+    trg_reader: !PlainTextReader
+      vocab: !Ref { name: char_vocab }
+  train: !SimpleTrainingRegimen
+    trainer: !AdamTrainer
+      alpha: 0.0003
+      skip_noisy: True
+    run_for_epochs: *RUN_FOR_EPOCHS
+    max_num_train_sents: *MAX_NUM_TRAIN_SENTS
+    batcher: !WordSrcBatcher
+      avg_batch_size: 36
+      pad_src_to_multiple: 4
+    lr_decay: 0.5
+    lr_decay_times: 1
+    patience: 5
+    initial_patience: 10
+    dev_every: *DEV_EVERY
+    restart_trainer: True
+    name: '{EXP}.asr'
+    max_src_len: 1500
+    max_trg_len: 350
+    src_file: '{DATA}/wsj_fbank40d_train_si284.h5'
+    trg_file: '{DATA}/wsj_train_si284.proc.noid'
+    dev_tasks:
+      - !AccuracyEvalTask
+        eval_metrics: wer,cer
+        src_file: '{DATA}/wsj_fbank40d_dev93.h5'
+        ref_file: '{DATA}/wsj_test_dev93.proc.noid.words'
+        hyp_file: '{EXP_DIR}/hyp/{EXP}.dev_asr_hyp'
+        inference: !AutoRegressiveInference
+          batcher: !InOrderBatcher { pad_src_to_multiple: 4 }
+          post_process: join-char
+          max_src_len: 1500
+          max_num_sents: 1000
+          search_strategy: !BeamSearch
+            max_len: 350
+            beam_size: 15
+            len_norm: !PolynomialNormalization
+              apply_during_search: true
+              m: 1.5
+      - !LossEvalTask
+        max_src_len: 1500
+        src_file: '{DATA}/wsj_fbank40d_dev93.h5'
+        ref_file: '{DATA}/wsj_test_dev93.proc.noid'
+        max_num_sents: 1000
+  evaluate:
+    - !AccuracyEvalTask
+      eval_metrics: bleu
+      src_file: '{DATA}/wsj_fbank40d_eval92.h5'
+      ref_file: '{DATA}/wsj_test_eval92.proc.noid.words'
+      hyp_file: '{EXP_DIR}/hyp/{EXP}.eval_casc_hyp'
+      inference: !AutoRegressiveInference
+        batcher: !InOrderBatcher { pad_src_to_multiple: 4 }
+        post_process: join-char
+        #max_src_len: 1500
+        search_strategy: !BeamSearch
+          max_len: 350
+          beam_size: 15
+          len_norm: !PolynomialNormalization
+            apply_during_search: true
+            m: 1.5
+    - !LossEvalTask
+      #max_src_len: 1500
+      src_file: '{DATA}/wsj_fbank40d_eval92.h5'
+      ref_file: '{DATA}/wsj_test_eval92.proc.noid'
