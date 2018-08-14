@@ -49,10 +49,10 @@ exp0003a.1: !Experiment
           - !AccuracyEvalTask
             eval_metrics: bleu
             desc: st_acc
-            src_file: '{DATA_EN}/fisher_cmvn_fbank40_dev.h5'
+            src_file: ['{DATA_EN}/fisher_cmvn_fbank40_dev.h5', '{DATA}/fisher_dev.es_filt.proc.noid']
             ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid.words'
             hyp_file: '{EXP_DIR}/hyp/{EXP}.dev_slt_hyp'
-            model: !Ref { path: train.tasks.0.model }
+            model: !Ref { path: train.tasks.2.model }
             inference: !AutoRegressiveInference
               batcher: !InOrderBatcher
                 _xnmt_id: inference_batcher_audio
@@ -68,9 +68,9 @@ exp0003a.1: !Experiment
           - !LossEvalTask
             max_src_len: 1500
             desc: st_loss
-            src_file: '{DATA_EN}/fisher_cmvn_fbank40_dev.h5'
+            src_file: ['{DATA_EN}/fisher_cmvn_fbank40_dev.h5', '{DATA}/fisher_dev.es_filt.proc.noid']
             ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid'
-            model: !Ref { path: train.tasks.0.model }
+            model: !Ref { path: train.tasks.2.model }
             batcher: !Ref { name: inference_batcher_audio }
           - !AccuracyEvalTask
             eval_metrics: wer,cer
@@ -118,7 +118,7 @@ exp0003a.1: !Experiment
             src_file: '{DATA}/fisher_dev.es_filt.proc.noid'
             ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid.words'
             hyp_file: '{EXP_DIR}/hyp/{EXP}.dev_mt_hyp'
-            model: !Ref { path: train.tasks.2.model }
+            model: !Ref { path: train.tasks.1.model }
             inference: !AutoRegressiveInference
               batcher: !InOrderBatcher
                 _xnmt_id: inference_batcher_text
@@ -131,7 +131,7 @@ exp0003a.1: !Experiment
             max_src_len: 1500
             src_file: '{DATA}/fisher_dev.es_filt.proc.noid'
             ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid'
-            model: !Ref { path: train.tasks.2.model }
+            model: !Ref { path: train.tasks.1.model }
             batcher: !Ref { name: inference_batcher_text }
     - !SimpleTrainingTask
       kwargs:
@@ -219,7 +219,7 @@ exp0003a.1: !Experiment
       src_file: ['{DATA_EN}/fisher_cmvn_fbank40_test.h5', '{DATA}/fisher_test.es_filt.proc.noid']
       ref_file: '{DATA_EN}/fisher_test.en.0_filt.proc.noid.words'
       hyp_file: '{EXP_DIR}/hyp/{EXP}.eval_slt_hyp'
-      model: !Ref { path: train.tasks.0.model }
+      model: !Ref { path: train.tasks.2.model }
       inference: !AutoRegressiveInference
         batcher: !Ref { name: inference_batcher_audio }
         post_process: join-char
@@ -234,5 +234,5 @@ exp0003a.1: !Experiment
       max_src_len: 1500
       src_file: ['{DATA_EN}/fisher_cmvn_fbank40_test.h5', '{DATA}/fisher_test.es_filt.proc.noid']
       ref_file: '{DATA_EN}/fisher_test.en.0_filt.proc.noid'
-      model: !Ref { path: train.tasks.0.model }
+      model: !Ref { path: train.tasks.2.model }
       batcher: !Ref { name: inference_batcher_audio }
