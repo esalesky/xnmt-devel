@@ -59,6 +59,7 @@ exp0003a.1: !Experiment
                 pad_src_to_multiple: 4
               post_process: join-char
               max_src_len: 1500
+              max_num_sents: 1000
               search_strategy: !BeamSearch
                 max_len: 350
                 beam_size: 15
@@ -83,6 +84,7 @@ exp0003a.1: !Experiment
               batcher: !Ref { name: inference_batcher_audio }
               post_process: join-char
               max_src_len: 1500
+              max_num_sents: 1000
           - !LossEvalTask
             max_src_len: 1500
             desc: asr_loss
@@ -124,6 +126,7 @@ exp0003a.1: !Experiment
                 _xnmt_id: inference_batcher_text
               post_process: join-char
               max_src_len: 1500
+              max_num_sents: 1000
               # no beam search for auxiliary tasks
               search_strategy: !BeamSearch
                 max_len: 350

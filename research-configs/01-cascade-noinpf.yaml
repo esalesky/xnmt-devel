@@ -82,6 +82,7 @@ exp0001a.1: !Experiment
               batcher: !Ref { name: inference_audio_batcher }
               post_process: join-char
               max_src_len: 1500
+              max_num_sents: 1000
               search_strategy: !BeamSearch
                 max_len: 350
               # no beam search for auxiliary tasks
@@ -140,6 +141,7 @@ exp0001a.1: !Experiment
               batcher: !InOrderBatcher { batch_size: 1 }
               post_process: join-char
               max_src_len: 1500
+              max_num_sents: 1000
               # no beam search for auxiliary tasks
               search_strategy: !BeamSearch
                 max_len: 350
