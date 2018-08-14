@@ -92,6 +92,7 @@ exp0002a.1: !Experiment
             ref_file: '{DATA}/fisher_dev.es_filt.proc.noid'
             model: !Ref { path: train.tasks.0.model }
             batcher: !Ref { path: train.tasks.0.batcher }
+            max_num_sents: 1000
     - !SimpleTrainingTask
       kwargs:
         << : *task1
@@ -151,6 +152,7 @@ exp0002a.1: !Experiment
             ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid'
             model: !Ref { path: train.tasks.1.model }
             batcher: !Ref { path: train.tasks.1.batcher }
+            max_num_sents: 1000
   evaluate:
     - !AccuracyEvalTask
       desc: casc_acc

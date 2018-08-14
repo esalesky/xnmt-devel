@@ -131,6 +131,7 @@ exp0005a.1: !Experiment
             ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid'
             model: !Ref { path: train.tasks.0.model }
             batcher: !Ref { name: inference_batcher_audio }
+            max_num_sents: 1000
     - !SimpleTrainingTask
       kwargs:
         << : *task1
@@ -160,6 +161,7 @@ exp0005a.1: !Experiment
             ref_file: '{DATA}/fisher_dev.es_filt.proc.noid'
             model: !Ref { name: asr_symmetric_translator }
             batcher: !Ref { name: inference_batcher_audio }
+            max_num_sents: 1000
     - !SimpleTrainingTask
       kwargs:
         << : *task1
@@ -204,6 +206,7 @@ exp0005a.1: !Experiment
             ref_file: '{DATA_EN}/fisher_dev.en.0_filt.proc.noid'
             model: !Ref { path: train.tasks.2.model }
             batcher: !Ref { name: inference_batcher_text }
+            max_num_sents: 1000
   evaluate:
     - !AccuracyEvalTask
       eval_metrics: bleu
