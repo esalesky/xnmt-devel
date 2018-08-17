@@ -31,8 +31,6 @@ class DualEncoderSimilarity(models.ConditionedModel, Serializable):
 
     return model_loss
 
-  def get_primary_loss(self): return "dist"
-
 
 class DistLoss(Serializable, loss_calculators.LossCalculator):
   yaml_tag = '!DistLoss'

@@ -446,7 +446,12 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
       ret = argmax * dy.parameter(self.trg_embedder.embeddings)
       ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
     elif mode == "sample":
-      sampled = dec_state.out_prob.nppvalue()
+      sampled_vals = []
+      for bi in range(batch_size):
+        sampled_vals.append(
+          np.random.choice(vocab_size,
+                           p=dec_state.out_prob.npvalue()[:, bi] / np.sum(dec_state.out_prob.npvalue()[:, bi])))
+      # TODO: finish the below
       argmax = dy.reshape(dec_state.out_prob.nppvalue(), (1, vocab_size), batch_size=batch_size)
       ret = argmax * dy.parameter(self.trg_embedder.embeddings)
       ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
@@ -456,9 +461,6 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
       raise ValueError(f"unknown value for mode: {mode}")
     if ret is not None: self._chosen_rnn_inputs.append(ret)
     return ret
-
-  def get_primary_loss(self) -> str:
-    return "mle"
 
   @events.handle_xnmt_event
   def on_calc_additional_loss(self, *args, **kwargs):
