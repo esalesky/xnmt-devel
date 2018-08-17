@@ -32,15 +32,16 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     scorer:
     inference:
     max_dec_len:
-    mode: what to feed into the LSTM input in 'translate' mode
+    mode: what to feed into the LSTM input
           * ``context``: feed the previous attention context
           * ``expected``: word embeddings weighted by softmax probs from last time step
           * ``argmax``: discrete token lookup based on model predictions
           * ``argmax_st``: as ``argmax``, but use the straight-through gradient estimator for the argmax operation
+          * ``sample``: discrete sampling from softmax probs (not back-propagated)
           * ``teacher``: as ``argmax`` at test time, but use teacher forcing (correct labels) for training
           * ``split``: teacher-forcing to compute attentions, then feed in current (not previous) context
-    mode_translate: what to feed into the LSTM input in 'translate' mode. same options as for ``mode_translate``.
-    mode_transduce: what to feed into the LSTM input in 'transduce' mode. same options as for ``mode_translate``.
+    mode_translate: what to feed into the LSTM input in 'translate' mode. same options as for ``mode``.
+    mode_transduce: what to feed into the LSTM input in 'transduce' mode. same options as for ``mode``.
     unfold_until: how long to unfold the RNN at test time for both the transducer and generator model variants, and at
                   training time for the transducer model (train time / generator model is dictated by data)
                   * ``eos``: unfold until EOS token gets largest probability (or max_dec_len is reached)
@@ -395,7 +396,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                         prev_ref_action: Optional[batchers.Batch] = None) -> dy.Expression:
     outputs = self._unfold_one_step(dec_state=dec_state, batch_size=batch_size, mode=mode, mask=mask, cur_step=cur_step,
                                     prev_ref_action=prev_ref_action)
-    if mode in ["expected", "argmax", "argmax_st", "teacher", "split"]:
+    if mode in ["expected", "argmax", "argmax_st", "sample", "teacher", "split"]:
       dec_state.out_prob = self.scorer.calc_probs(outputs)
     return self.scorer.calc_scores(outputs)
 
@@ -440,7 +441,13 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
       ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
     elif mode in ["argmax", "argmax_st"]:
       gradient_mode = "zero_gradient" if mode == "argmax" else "straight_through_gradient"
-      argmax = dy.reshape(dy.argmax(dec_state.out_prob, gradient_mode=gradient_mode), (1, vocab_size), batch_size=batch_size)
+      argmax = dy.reshape(dy.argmax(dec_state.out_prob, gradient_mode=gradient_mode), (1, vocab_size),
+                          batch_size=batch_size)
+      ret = argmax * dy.parameter(self.trg_embedder.embeddings)
+      ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
+    elif mode == "sample":
+      sampled = dec_state.out_prob.nppvalue()
+      argmax = dy.reshape(dec_state.out_prob.nppvalue(), (1, vocab_size), batch_size=batch_size)
       ret = argmax * dy.parameter(self.trg_embedder.embeddings)
       ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
     elif mode in ["teacher", "split"]:
