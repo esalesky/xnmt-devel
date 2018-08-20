@@ -447,12 +447,19 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
       ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
     elif mode == "sample":
       sampled_vals = []
+      npval = dec_state.out_prob.npvalue()
       for bi in range(batch_size):
+        npval_bi = npval[:, bi] if batch_size>1 else npval
         sampled_vals.append(
           np.random.choice(vocab_size,
-                           p=dec_state.out_prob.npvalue()[:, bi] / np.sum(dec_state.out_prob.npvalue()[:, bi])))
+                           p=npval_bi / np.sum(npval_bi)))
       # TODO: finish the below
-      argmax = dy.reshape(dec_state.out_prob.nppvalue(), (1, vocab_size), batch_size=batch_size)
+      idxs = ([], [])
+      for batch_i in range(batch_size):
+        idxs[0].append(sampled_vals[batch_i])
+        idxs[1].append(batch_i)
+      argmax = dy.sparse_inputTensor(idxs, values=np.ones(batch_size), shape=(vocab_size, batch_size), batched=True, )
+      argmax = dy.reshape(argmax, (1, vocab_size), batch_size=batch_size)
       ret = argmax * dy.parameter(self.trg_embedder.embeddings)
       ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
     elif mode in ["teacher", "split"]:
