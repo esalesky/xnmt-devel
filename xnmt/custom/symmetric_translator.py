@@ -1,4 +1,5 @@
 from typing import Optional, Sequence, Union
+import numbers
 import random
 
 import numpy as np
@@ -79,7 +80,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                split_regularizer: bool = False,
                split_dual: Union[bool,Sequence[float]] = False,
                split_dual_proj:bool = None,
-               sampling_prob:float = 0.0,
+               sampling_prob: numbers.Number = 0.0,
                compute_report: bool = Ref("exp_global.compute_report", default=False)):
     super().__init__(src_reader=src_reader, trg_reader=trg_reader)
     assert mode is None or (mode_translate is None and mode_transduce is None)
@@ -449,7 +450,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
       ret = argmax * dy.parameter(self.trg_embedder.embeddings)
       ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
     elif mode in ["teacher", "split"]:
-      do_sample = self.train and self.sampling_prob > 0.0 and random.random() < self.sampling_prob
+      do_sample = self.train and dec_state.out_prob and self.sampling_prob > 0.0 and random.random() < self.sampling_prob
       if not do_sample:
         ret = self.trg_embedder.embed(prev_ref_action)
       else: # do sample
