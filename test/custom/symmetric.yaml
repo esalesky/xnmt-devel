@@ -7,7 +7,7 @@ symmetric: !Experiment
     compute_report: True
   model: !SymmetricTranslator
     mode: teacher
-    sampling_prob: 1.0 # !Scalar { initial: 1.0 }
+    sampling_prob: !DefinedSequence { initial: 1.0 }
 #    unfold_until: supervised
     src_reader: !CompoundReader
       vocab: !Vocab {vocab_file: examples/data/head.ja.vocab}
