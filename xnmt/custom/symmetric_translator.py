@@ -1,4 +1,5 @@
 from typing import Optional, Sequence, Union
+import random
 
 import numpy as np
 import dynet as dy
@@ -37,7 +38,6 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
           * ``expected``: word embeddings weighted by softmax probs from last time step
           * ``argmax``: discrete token lookup based on model predictions
           * ``argmax_st``: as ``argmax``, but use the straight-through gradient estimator for the argmax operation
-          * ``sample``: discrete sampling from softmax probs (not back-propagated)
           * ``teacher``: as ``argmax`` at test time, but use teacher forcing (correct labels) for training
           * ``split``: teacher-forcing to compute attentions, then feed in current (not previous) context
     mode_translate: what to feed into the LSTM input in 'translate' mode. same options as for ``mode``.
@@ -51,6 +51,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     split_dual: feed both current context and current label into split (step-2) RNN (with projection to match dimensions)
                 - pair of floats: dropout probs, i.e. (label_drop,context_drop)
                 - ``True``: equivalent to [0.0, 0.0]
+    sampling_prob: for teacher or split mode, probability of sampling from model rather than using teacher forcing
     compute_report:
   """
   yaml_tag = "!SymmetricTranslator"
@@ -77,7 +78,8 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                transducer_loss: bool = False,
                split_regularizer: bool = False,
                split_dual: Union[bool,Sequence[float]] = False,
-               split_dual_proj = None,
+               split_dual_proj:bool = None,
+               sampling_prob:float = 0.0,
                compute_report: bool = Ref("exp_global.compute_report", default=False)):
     super().__init__(src_reader=src_reader, trg_reader=trg_reader)
     assert mode is None or (mode_translate is None and mode_transduce is None)
@@ -110,6 +112,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
       self.split_dual_proj = self.add_serializable_component("split_dual_proj", split_dual_proj,
                                                              lambda: transforms.Linear(input_dim=self.dec_lstm.input_dim*2,
                                                                                            output_dim=self.dec_lstm.input_dim))
+    self.sampling_prob = sampling_prob
     self.compute_report = compute_report
 
   def shared_params(self):
@@ -396,7 +399,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                         prev_ref_action: Optional[batchers.Batch] = None) -> dy.Expression:
     outputs = self._unfold_one_step(dec_state=dec_state, batch_size=batch_size, mode=mode, mask=mask, cur_step=cur_step,
                                     prev_ref_action=prev_ref_action)
-    if mode in ["expected", "argmax", "argmax_st", "sample", "teacher", "split"]:
+    if mode in ["expected", "argmax", "argmax_st", "teacher", "split"]:
       dec_state.out_prob = self.scorer.calc_probs(outputs)
     return self.scorer.calc_scores(outputs)
 
@@ -445,25 +448,26 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                           batch_size=batch_size)
       ret = argmax * dy.parameter(self.trg_embedder.embeddings)
       ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
-    elif mode == "sample":
-      sampled_vals = []
-      npval = dec_state.out_prob.npvalue()
-      for bi in range(batch_size):
-        npval_bi = npval[:, bi] if batch_size>1 else npval
-        sampled_vals.append(
-          np.random.choice(vocab_size,
-                           p=npval_bi / np.sum(npval_bi)))
-      # TODO: finish the below
-      idxs = ([], [])
-      for batch_i in range(batch_size):
-        idxs[0].append(sampled_vals[batch_i])
-        idxs[1].append(batch_i)
-      argmax = dy.sparse_inputTensor(idxs, values=np.ones(batch_size), shape=(vocab_size, batch_size), batched=True, )
-      argmax = dy.reshape(argmax, (1, vocab_size), batch_size=batch_size)
-      ret = argmax * dy.parameter(self.trg_embedder.embeddings)
-      ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
     elif mode in ["teacher", "split"]:
-      ret = self.trg_embedder.embed(prev_ref_action)
+      do_sample = self.train and self.sampling_prob > 0.0 and random.random() < self.sampling_prob
+      if not do_sample:
+        ret = self.trg_embedder.embed(prev_ref_action)
+      else: # do sample
+        sampled_vals = []
+        npval = dec_state.out_prob.npvalue()
+        for bi in range(batch_size):
+          npval_bi = npval[:, bi] if batch_size>1 else npval
+          sampled_vals.append(
+            np.random.choice(vocab_size,
+                             p=npval_bi / np.sum(npval_bi)))
+        idxs = ([], [])
+        for batch_i in range(batch_size):
+          idxs[0].append(sampled_vals[batch_i])
+          idxs[1].append(batch_i)
+        argmax = dy.sparse_inputTensor(idxs, values=np.ones(batch_size), shape=(vocab_size, batch_size), batched=True, )
+        argmax = dy.reshape(argmax, (1, vocab_size), batch_size=batch_size)
+        ret = argmax * dy.parameter(self.trg_embedder.embeddings)
+        ret = dy.reshape(ret, (hidden_size,), batch_size=batch_size)
     else:
       raise ValueError(f"unknown value for mode: {mode}")
     if ret is not None: self._chosen_rnn_inputs.append(ret)
