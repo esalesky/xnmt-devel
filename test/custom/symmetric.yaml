@@ -4,10 +4,10 @@ symmetric: !Experiment
     log_file: '{EXP_DIR}/logs/{EXP}.log'
     default_layer_dim: 512
     dropout: 0.3
-    compute_report: True
+    #compute_report: True
   model: !SymmetricTranslator
     mode: teacher
-    sampling_prob: !DefinedSequence { initial: 1.0 }
+    sampling_prob: !DefinedSequence { sequence: [0.0,0.3,0.4,0.5] }
 #    unfold_until: supervised
     src_reader: !CompoundReader
       vocab: !Vocab {vocab_file: examples/data/head.ja.vocab}
@@ -39,7 +39,7 @@ symmetric: !Experiment
       batch_size: 10
     trainer: !AdamTrainer
       alpha: 0.001
-    run_for_epochs: 1
+    run_for_epochs: 10
     src_file: [examples/data/head.ja, examples/data/head.en]
     trg_file: examples/data/head.en
     dev_tasks:
@@ -58,4 +58,4 @@ symmetric: !Experiment
         ref_file: examples/data/head.en
         batcher: !InOrderBatcher
           batch_size: 1
-        reporter: !AttentionReporter {}
+        #reporter: !AttentionReporter {}
