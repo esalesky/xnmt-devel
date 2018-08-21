@@ -80,7 +80,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                transducer_loss: bool = False,
                split_regularizer: Union[bool, numbers.Real] = False,
                split_dual: Union[bool, Sequence[numbers.Real]] = False,
-               split_dual_proj: Any = None,
+               split_dual_proj: Optional[transforms.Linear] = None,
                sampling_prob: numbers.Number = 0.0,
                compute_report: bool = Ref("exp_global.compute_report", default=False)):
     super().__init__(src_reader=src_reader, trg_reader=trg_reader)
