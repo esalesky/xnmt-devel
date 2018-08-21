@@ -48,7 +48,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                   * ``eos``: unfold until EOS token gets largest probability (or max_dec_len is reached)
                   * ``supervised``:
     transducer_loss: if True, add transducer loss as auxiliary loss
-    split_regularizer: if True, use additional loss ||E(y_i)-context_i||
+    split_regularizer: if True, use additional loss ||E(y_i)-context_i|| (if a float value, it's used to scale the loss)
     split_dual: feed both current context and current label into split (step-2) RNN (with projection to match dimensions)
                 - pair of floats: dropout probs, i.e. (label_drop,context_drop)
                 - ``True``: equivalent to [0.0, 0.0]
@@ -77,7 +77,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                mode_transduce: Optional[str] = None,
                unfold_until: str = "eos",
                transducer_loss: bool = False,
-               split_regularizer: bool = False,
+               split_regularizer: Union[bool, numbers.Real] = False,
                split_dual: Union[bool,Sequence[float]] = False,
                split_dual_proj:bool = None,
                sampling_prob: numbers.Number = 0.0,
@@ -207,10 +207,6 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     if self.mode_transduce == "split":
       # split mode: use attentions to compute context, then run RNNs over these context inputs
       if self.split_regularizer:
-        if len(atts_list) != len(self._chosen_rnn_inputs):
-          print(f"atts_list: {atts_list}")
-          print(f"self._chosen_rnn_inputs: {self._chosen_rnn_inputs}")
-          print(f"x: {x}")
         assert len(atts_list) == len(self._chosen_rnn_inputs), f"{len(atts_list)} != {len(self._chosen_rnn_inputs)}"
       split_output_states = []
       split_rnn_state = first_state.rnn_state
@@ -226,6 +222,8 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
           lstm_input = self.split_dual_proj(dy.concatenate([lstm_input,lstm_input2]))
         if self.split_regularizer and pos < len(self._chosen_rnn_inputs):
           penalty = dy.squared_norm(lstm_input - self._chosen_rnn_inputs[pos])
+          if self.split_regularizer != 1:
+            penalty = self.split_regularizer * penalty
           self.split_reg_penalty_expr = penalty
         split_rnn_state = split_rnn_state.add_input(lstm_input)
         split_output_states.append(split_rnn_state.h()[-1])

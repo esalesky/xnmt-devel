@@ -23,8 +23,11 @@ symmetric: !Experiment
       vocab: !Ref { path: model.src_reader.readers.0.vocab }
     trg_embedder: !DenseWordEmbedder
       vocab: !Ref { path: model.trg_reader.vocab }
-    encoder: !BiLSTMSeqTransducer
-      layers: 1
+    encoder: !SymmetricTranslator
+      mode: split
+      split_regularizer: 0.5
+      trg_embedder: !DenseWordEmbedder
+        vocab: !Ref { path: model.src_reader.vocab }
     attender: !MlpAttender
       hidden_dim: 512
       state_dim: 512
