@@ -88,7 +88,7 @@ exp0008a.1: !Experiment
         max_num_sents: 1000
   evaluate:
     - !AccuracyEvalTask
-      eval_metrics: bleu
+      eval_metrics: wer,cer
       src_file: '{DATA}/wsj_fbank40d_eval92.h5'
       ref_file: '{DATA}/wsj_test_eval92.proc.noid.words'
       hyp_file: '{EXP_DIR}/hyp/{EXP}.eval_casc_hyp'
