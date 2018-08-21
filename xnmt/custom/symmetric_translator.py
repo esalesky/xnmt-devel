@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Union
+from typing import Any, Optional, Sequence, Union
 import numbers
 import random
 
@@ -52,6 +52,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     split_dual: feed both current context and current label into split (step-2) RNN (with projection to match dimensions)
                 - pair of floats: dropout probs, i.e. (label_drop,context_drop)
                 - ``True``: equivalent to [0.0, 0.0]
+    split_dual_proj: automatically set
     sampling_prob: for teacher or split mode, probability of sampling from model rather than using teacher forcing
     compute_report:
   """
@@ -60,7 +61,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
   @events.register_xnmt_handler
   @serializable_init
   def __init__(self,
-               trg_embedder:embedders.DenseWordEmbedder,
+               trg_embedder: embedders.DenseWordEmbedder,
                src_reader: input_readers.InputReader = None,
                trg_reader: input_readers.InputReader = None,
                src_embedder=bare(embedders.SimpleWordEmbedder),
@@ -78,8 +79,8 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                unfold_until: str = "eos",
                transducer_loss: bool = False,
                split_regularizer: Union[bool, numbers.Real] = False,
-               split_dual: Union[bool,Sequence[float]] = False,
-               split_dual_proj:bool = None,
+               split_dual: Union[bool, Sequence[numbers.Real]] = False,
+               split_dual_proj: Any = None,
                sampling_prob: numbers.Number = 0.0,
                compute_report: bool = Ref("exp_global.compute_report", default=False)):
     super().__init__(src_reader=src_reader, trg_reader=trg_reader)
