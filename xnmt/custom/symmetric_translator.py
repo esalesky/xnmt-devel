@@ -222,6 +222,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
             lstm_input2 = dy.dropout_batch(lstm_input2, self.split_dual[1])
           lstm_input = self.split_dual_proj(dy.concatenate([lstm_input,lstm_input2]))
         if self.split_regularizer and pos < len(self._chosen_rnn_inputs):
+          # _chosen_rnn_inputs does not contain first (empty) input, so this is in fact like comparing to pos-1:
           penalty = dy.squared_norm(lstm_input - self._chosen_rnn_inputs[pos])
           if self.split_regularizer != 1:
             penalty = self.split_regularizer * penalty
