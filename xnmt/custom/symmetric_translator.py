@@ -50,10 +50,11 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     transducer_loss: if True, add transducer loss as auxiliary loss
     split_regularizer: if True, use additional loss ||E(y_i)-context_i|| (if a float value, it's used to scale the loss)
     split_dual: feed both current context and current label into split (step-2) RNN (with projection to match dimensions)
-                - pair of floats: dropout probs, i.e. (label_drop,context_drop)
+                - pair of floats: dropout probs, i.e. (context_drop, label_drop)
                 - ``True``: equivalent to [0.0, 0.0]
     dropout_dec_state: rate for block dropout applied on decoder state, so that only context vector is passed to output
     split_dual_proj: automatically set
+    split_context_transform: run split context through transform before feeding back into RNN
     sampling_prob: for teacher or split mode, probability of sampling from model rather than using teacher forcing
     compute_report:
   """
@@ -83,6 +84,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                split_dual: Union[bool, Sequence[numbers.Real]] = False,
                dropout_dec_state: float = 0.0,
                split_dual_proj: Optional[transforms.Linear] = None,
+               split_context_transform: Optional[transforms.Transform]= None,
                sampling_prob: numbers.Number = 0.0,
                compute_report: bool = Ref("exp_global.compute_report", default=False)):
     super().__init__(src_reader=src_reader, trg_reader=trg_reader)
@@ -112,6 +114,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     self.split_regularizer = split_regularizer
     self.dropout_dec_state = dropout_dec_state
     self.split_dual = [0.0, 0.0] if split_dual is True else split_dual
+    self.split_context_transform = split_context_transform
     if self.split_dual:
       assert len(self.split_dual)==2 and max(self.split_dual) <= 1.0 and min(self.split_dual) >= 0.0
       self.split_dual_proj = self.add_serializable_component("split_dual_proj", split_dual_proj,
@@ -203,7 +206,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
             done[batch_i] = True
             out_mask.np_arr[batch_i,pos+1:] = 1.0
         if pos>0 and all(done):
-          atts_list.append(self.attender.get_last_attention()) # TODO: correct here?
+          atts_list.append(self.attender.get_last_attention())
           output_states.append(current_state.rnn_state.h()[-1])
           break
       output_states.append(current_state.rnn_state.h()[-1])
@@ -215,22 +218,24 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
       split_output_states = []
       split_rnn_state = first_state.rnn_state
       for pos, att in enumerate(atts_list):
-        lstm_input = self.attender.curr_sent.as_tensor() * att
-        lstm_input = dy.reshape(lstm_input, (lstm_input.dim()[0][0],), batch_size=batch_size)
+        lstm_input_context = self.attender.curr_sent.as_tensor() * att # TODO: better reuse the already computed context vecs
+        lstm_input_context = dy.reshape(lstm_input_context, (lstm_input_context.dim()[0][0],), batch_size=batch_size)
         if self.split_dual:
-          lstm_input2 = self._chosen_rnn_inputs[pos]
+          lstm_input_label = self._chosen_rnn_inputs[pos]
           if self.split_dual[0] > 0.0 and self.train:
-            lstm_input = dy.dropout_batch(lstm_input, self.split_dual[0])
+            lstm_input_context = dy.dropout_batch(lstm_input_context, self.split_dual[0])
           if self.split_dual[1] > 0.0 and self.train:
-            lstm_input2 = dy.dropout_batch(lstm_input2, self.split_dual[1])
-          lstm_input = self.split_dual_proj.transform(dy.concatenate([lstm_input,lstm_input2]))
+            lstm_input_label = dy.dropout_batch(lstm_input_label, self.split_dual[1])
+          if self.split_context_transform:
+            lstm_input_context = self.split_context_transform.transform(lstm_input_context)
+          lstm_input_context = self.split_dual_proj.transform(dy.concatenate([lstm_input_context, lstm_input_label]))
         if self.split_regularizer and pos < len(self._chosen_rnn_inputs):
           # _chosen_rnn_inputs does not contain first (empty) input, so this is in fact like comparing to pos-1:
-          penalty = dy.squared_norm(lstm_input - self._chosen_rnn_inputs[pos])
+          penalty = dy.squared_norm(lstm_input_context - self._chosen_rnn_inputs[pos])
           if self.split_regularizer != 1:
             penalty = self.split_regularizer * penalty
           self.split_reg_penalty_expr = penalty
-        split_rnn_state = split_rnn_state.add_input(lstm_input)
+        split_rnn_state = split_rnn_state.add_input(lstm_input_context)
         split_output_states.append(split_rnn_state.h()[-1])
       assert len(output_states) == len(split_output_states)
       output_states = split_output_states
