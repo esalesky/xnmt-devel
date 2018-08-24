@@ -25,7 +25,7 @@ symmetric: !Experiment
       vocab: !Ref { path: model.trg_reader.vocab }
     encoder: !SymmetricTranslator
       mode: split
-      split_regularizer: 0.5
+      dropout_dec_state: 0.5
       trg_embedder: !DenseWordEmbedder
         vocab: !Ref { path: model.src_reader.vocab }
     attender: !MlpAttender

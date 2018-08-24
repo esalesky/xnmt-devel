@@ -52,6 +52,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     split_dual: feed both current context and current label into split (step-2) RNN (with projection to match dimensions)
                 - pair of floats: dropout probs, i.e. (label_drop,context_drop)
                 - ``True``: equivalent to [0.0, 0.0]
+    dropout_dec_state: rate for block dropout applied on decoder state, so that only context vector is passed to output
     split_dual_proj: automatically set
     sampling_prob: for teacher or split mode, probability of sampling from model rather than using teacher forcing
     compute_report:
@@ -80,6 +81,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                transducer_loss: bool = False,
                split_regularizer: Union[bool, numbers.Real] = False,
                split_dual: Union[bool, Sequence[numbers.Real]] = False,
+               dropout_dec_state: float = 0.0,
                split_dual_proj: Optional[transforms.Linear] = None,
                sampling_prob: numbers.Number = 0.0,
                compute_report: bool = Ref("exp_global.compute_report", default=False)):
@@ -108,6 +110,7 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     self.transducer_loss = transducer_loss
     if split_regularizer: assert self.mode_transduce == "split"
     self.split_regularizer = split_regularizer
+    self.dropout_dec_state = dropout_dec_state
     self.split_dual = [0.0, 0.0] if split_dual is True else split_dual
     if self.split_dual:
       assert len(self.split_dual)==2 and max(self.split_dual) <= 1.0 and min(self.split_dual) >= 0.0
@@ -421,6 +424,8 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
     dec_state.rnn_state = new_rnn_state
     rnn_output = dec_state.rnn_state.output()
     dec_state.context = self.attender.calc_context(rnn_output)
+    if self.dropout_dec_state and self.train:
+      rnn_output = dy.dropout_batch(rnn_output, self.dropout_dec_state)
     outputs = self.transform.transform(dy.concatenate([rnn_output, dec_state.context]))
     return outputs
 
