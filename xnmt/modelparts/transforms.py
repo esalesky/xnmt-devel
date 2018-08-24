@@ -1,3 +1,4 @@
+from typing import Optional, Sequence
 import numbers
 
 import dynet as dy
@@ -178,13 +179,32 @@ class MLP(Transform, Serializable):
                activation: str = 'tanh',
                hidden_layers: numbers.Integral = 1,
                param_init: param_initializers.ParamInitializer = Ref("exp_global.param_init", default=bare(param_initializers.GlorotInitializer)),
-               bias_init: param_initializers.ParamInitializer = Ref("exp_global.bias_init", default=bare(param_initializers.ZeroInitializer))):
-    self.layers = []
-    if hidden_layers > 0:
-      self.layers = [NonLinear(input_dim=input_dim, output_dim=hidden_dim, bias=bias, activation=activation, param_init=param_init, bias_init=bias_init)]
-      self.layers += [NonLinear(input_dim=hidden_dim, output_dim=hidden_dim, bias=bias, activation=activation, param_init=param_init, bias_init=bias_init) for _ in range(1,hidden_layers)]
-    self.layers += [Linear(input_dim=hidden_dim, output_dim=output_dim, bias=bias, param_init=param_init, bias_init=bias_init)]
+               bias_init: param_initializers.ParamInitializer = Ref("exp_global.bias_init", default=bare(param_initializers.ZeroInitializer)),
+               layers: Optional[Sequence[Transform]] = None):
+    self.layers = self.add_serializable_component("layers",
+                                                  layers,
+                                                  lambda: self._create_layers(num_layers=hidden_layers,
+                                                                              input_dim=input_dim,
+                                                                              hidden_dim=hidden_dim,
+                                                                              output_dim=output_dim,
+                                                                              bias=bias,
+                                                                              activation=activation,
+                                                                              param_init=param_init,
+                                                                              bias_init=bias_init))
 
+  def _create_layers(self, num_layers, input_dim, hidden_dim, output_dim, bias, activation, param_init, bias_init):
+    layers = []
+    if num_layers > 0:
+      layers = [NonLinear(input_dim=input_dim, output_dim=hidden_dim, bias=bias, activation=activation,
+                          param_init=param_init, bias_init=bias_init)]
+      layers += [NonLinear(input_dim=hidden_dim, output_dim=hidden_dim, bias=bias, activation=activation,
+                           param_init=param_init, bias_init=bias_init) for _ in range(1, num_layers)]
+    layers += [Linear(input_dim=hidden_dim if num_layers>0 else input_dim,
+                      output_dim=output_dim,
+                      bias=bias,
+                      param_init=param_init,
+                      bias_init=bias_init)]
+    return layers
   def transform(self, expr: dy.Expression) -> dy.Expression:
     for layer in self.layers:
       expr = layer.transform(expr)
