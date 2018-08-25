@@ -88,7 +88,8 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
                sampling_prob: numbers.Number = 0.0,
                compute_report: bool = Ref("exp_global.compute_report", default=False)):
     super().__init__(src_reader=src_reader, trg_reader=trg_reader)
-    assert mode is None or (mode_translate is None and mode_transduce is None)
+    assert mode is None or (mode_translate is None and mode_transduce is None), \
+      f"illegal combination: mode={mode}, mode_translate={mode_translate}, mode_transduce={mode_transduce}"
     assert mode or mode_translate or mode_transduce
     if mode_translate or mode_transduce: assert mode_translate and mode_transduce
     assert mode_translate != "split"
