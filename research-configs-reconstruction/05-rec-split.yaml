@@ -71,7 +71,7 @@ exp0005a.1: !Experiment
             bridge: !CopyBridge {}
             transform: !AuxNonLinear {}
             src_reader: !H5Reader
-              transpose: y
+              transpose: Transpose
             trg_reader: !PlainTextReader
               vocab: !Vocab
                 _xnmt_id: char_vocab

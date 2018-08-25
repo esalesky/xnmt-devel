@@ -72,7 +72,7 @@ exp0006a.1: !Experiment
             bridge: !CopyBridge {}
             transform: !AuxNonLinear {}
             src_reader: !H5Reader
-              transpose: y
+              transpose: True
             trg_reader: !PlainTextReader
               vocab: !Vocab
                 _xnmt_id: char_vocab
@@ -100,7 +100,7 @@ exp0006a.1: !Experiment
             _xnmt_id: compound_src_reader
             readers:
             - !H5Reader
-              transpose: y
+              transpose: True
             - !PlainTextReader
               vocab: !Ref { name: char_vocab }
             vocab: !Ref { name: char_vocab }

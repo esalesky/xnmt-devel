@@ -68,7 +68,7 @@ exp0002a.1: !Experiment
             bridge: !CopyBridge {}
             transform: !AuxNonLinear {}
           src_reader: !H5Reader
-            transpose: y
+            transpose: True
           trg_reader: !PlainTextReader
             vocab: !Ref { name: char_vocab }
         dev_tasks:

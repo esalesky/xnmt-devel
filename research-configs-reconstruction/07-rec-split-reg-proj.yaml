@@ -52,7 +52,7 @@ exp0007a.1: !Experiment
             mode_translate: teacher
             transducer_loss: True
             split_regularizer: True
-            split_dual_proj: True
+            split_dual: True
             src_embedder: !NoopEmbedder
               emb_dim: 40
             trg_embedder: !DenseWordEmbedder
@@ -73,7 +73,7 @@ exp0007a.1: !Experiment
             bridge: !CopyBridge {}
             transform: !AuxNonLinear {}
             src_reader: !H5Reader
-              transpose: y
+              transpose: True
             trg_reader: !PlainTextReader
               vocab: !Vocab
                 _xnmt_id: char_vocab
@@ -101,7 +101,7 @@ exp0007a.1: !Experiment
             _xnmt_id: compound_src_reader
             readers:
             - !H5Reader
-              transpose: y
+              transpose: True
             - !PlainTextReader
               vocab: !Ref { name: char_vocab }
             vocab: !Ref { name: char_vocab }
