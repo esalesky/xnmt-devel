@@ -28,6 +28,7 @@ symmetric: !Experiment
       dropout_dec_state: 0.5
       split_dual: [0.0, 0.5]
       split_context_transform: !MLP {}
+      split_regularizer: True
       trg_embedder: !DenseWordEmbedder
         vocab: !Ref { path: model.src_reader.vocab }
     attender: !MlpAttender
