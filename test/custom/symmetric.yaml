@@ -41,6 +41,7 @@ symmetric: !Experiment
     scorer: !Softmax {}
     bridge: !CopyBridge {}
   train: !SimpleTrainingRegimen
+    loss_calculator: !FeedbackLoss {}
     batcher: !InOrderBatcher
       batch_size: 10
     trainer: !AdamTrainer

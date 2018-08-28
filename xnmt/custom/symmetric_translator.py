@@ -493,4 +493,5 @@ class SymmetricTranslator(models.ConditionedModel, models.GeneratorModel, Serial
       loss_dict["symm_transd_loss"] = loss_expr
     if self.split_reg_penalty_expr is not None:
       loss_dict["symm_transd_reg_penalty"] = self.split_reg_penalty_expr
+    if len(loss_dict)==0: return None
     else: return losses.FactoredLossExpr(loss_dict)
