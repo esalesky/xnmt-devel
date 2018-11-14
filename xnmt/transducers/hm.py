@@ -13,19 +13,20 @@ from xnmt.persistence import serializable_init, Serializable, Ref, bare
 
 
 #?? yaml_tags, @register_xnmt_handler, @serializable_init
-#?? expr_seq & input format
-#?? division between cell & hm for layers / c / h etc
+#?? param_init for c,h,z
+#?? slope annealing
 
 class HM_LSTMCell(object):
     """
+    single layer HM implementation to enable HM_LSTMTransducer
     https://arxiv.org/pdf/1609.01704.pdf
     """
     def __init__(self,
                  below_dim,
                  hidden_dim,
                  above_dim,
-                 last_layer,
                  a,
+                 last_layer,
                  param_init=Ref("exp_global.param_init", default=bare(GlorotInitializer)),
                  bias_init=Ref("exp_global.bias_init", default=bare(ZeroInitializer))):
         self.below_dim  = below_dim
@@ -39,39 +40,44 @@ class HM_LSTMCell(object):
         if not self.last layer:
             self.p_W_2l_td = model.add_parameters(dim=(hidden_dim*4 + 1, above_dim), init=param_init.initializer((hidden_dim*4 + 1, above_dim)))
         self.p_W_0l_bu = model.add_parameters(dim=(hidden_dim*4 + 1, below_dim), init=param_init.initializer((hidden_dim*4 + 1, below_dim)))
-        self.p_bias = model.add_parameters(dim=(hidden_dim*4 + 1,), init=bias_init.initializer((hidden_dim*4 + 1,))) #?? cherry: z_bias init to 1
+        self.p_bias = model.add_parameters(dim=(hidden_dim*4 + 1,), init=bias_init.initializer((hidden_dim*4 + 1,)))
 
-    #?? how to anneal a?
-    def hard_sigmoid_slope_anneal(a=1, x):
+        # to track prev timestep c, h, & z values for this layer
+        self.c = dy.zeroes(dim=(network.hidden_dim,)) #?? does (hidden,) take care of batch_size?
+        self.h = dy.zeroes(dim=(network.hidden_dim,))
+        self.z = dy.ones(dim=(1,))
+
+    #todo: annealing schedule for a: `annealing the slope of the hard binarizer from 1.0 to 5.0 over 80k minibatches'
+    def hard_sigmoid_slope_anneal(a=1.0, x):
         tmp = (a * x + 1.0) / 2.0
-        output = np.clip(tmp, a_min=0, a_max=1)
+        output = np.clip(tmp, a_min=0, a_max=1) #?? can i do this to a dynet object? is there another way?
         return output
 
-#?? map to this format
-#    def transduce(self, xs: 'expression_seqs.ExpressionSequence') -> 'expression_seqs.ExpressionSequence':  
-    def forward(self, c, h_below, h, h_above, z, z_below):
+
+    #xs = input / h_below
+    def transduce(self, h_below: 'expression_seqs.ExpressionSequence', h_above, z_below) -> 'expression_seqs.ExpressionSequence':
         W_1l_r  = dy.parameter(self.p_W_1l_r)
         bias = dy.parameter(self.p_bias)
         
-        s_recur = W_11_r * h  #matrix multiply is *, element-wise is dy.cmult
+        s_recur = W_11_r * self.h  #matrix multiply is *, element-wise is dy.cmult
         if not self.last_layer:
             W_2l_td = dy.parameter(self.p_W_2l_td)
             W_0l_bu = dy.parameter(self.p_W_0l_bu)
             s_bottomup = W_01_bu * h_below
             s_topdown  = W_21_td * h_above
         else:
-            s_topdown  = np.zeros(s_recur.size())  # in pytorch would do Variable & requires_grad = False, but i don't see the equiv. ?? when can dynet and np things be multiplied ??
-            s_bottomup = W_11_r * h
-        s_bottomup = dy.cmult(np.tile(z_below, s_bottomup.shape), s_bottomup) #?? need to make parameter or? do i even need the tile? z_below * s_bottomup?
-        s_topdown  = dy.cmult(np.tile(z, s_topdown.shape, s_topdown) #?? need to make parameter or?
+            s_topdown  = dy.zeroes(s_recur.dim()) #?? this gets the shape e.g. ((5, 1), 1). do i actually want batch_size as well?
+            s_bottomup = W_11_r * self.h
+        s_bottomup = z_below * s_bottomup 
+        s_topdown  = self.z * s_topdown  #will be zeros if last_layer. is this right, or should z=1 in this case ??
         
-        fslice = s_recur + s_topdown + s_bottomup + bias #?? checkme. bias has same shape as s_recur et al?
+        fslice = s_recur + s_topdown + s_bottomup + bias #?? checkme. bias has same shape as s_recur et al? [4*hidden+1, batch_size]?
 
         i_ft = dy.pick_range(fslice, 0, self.hidden_dim)
         i_it = dy.pick_range(fslice, self.hidden_dim, self.hidden_dim*2)
         i_ot = dy.pick_range(fslice, self.hidden_dim*2, self.hidden_dim*3)
         i_gt = dy.pick_range(fslice, self.hidden_dim*3, self.hidden_dim*4)
-        f_t = dy.logistic(i_ft)  #?? why was there a +1.0 in customlstmseqtransducer
+        f_t = dy.logistic(i_ft + 1.0)  #+1.0 bc a paper said it was better to init that way (matthias)
         i_t = dy.logistic(i_it)
         o_t = dy.logistic(i_ot)
         g_t = dy.tanh(i_ut)
@@ -81,62 +87,84 @@ class HM_LSTMCell(object):
 
         #z = z_l,t-1
         #z_below = z_l-1,t
-        if z == 1:  #FLUSH
+        if self.z == 1: #FLUSH
             c_new = dy.cmult(i_t, g_t)
             h_new = dy.cmult(o_t, dy.tanh(c_new))
-        elif z_below == 0:  #COPY
-            c_new = c
-            h_new = h
-        else:  #UPDATE
-            c_new = dy.cmult(f_t, c) + dy.cmult(i_t * g_t)
+        elif z_below == 0: #COPY
+            c_new = self.c
+            h_new = self.h
+        else: #UPDATE
+            c_new = dy.cmult(f_t, self.c) + dy.cmult(i_t * g_t)
             h_new = dy.cmult(o_t, dy.tanh(c_new))
-            
-        return h_new, c_new, z_new, g_t
+        
+        self.c = c_new
+        self.h = h_new
+        self.z = z_new
+
+        return h_new, z_new
 
 
-class HM_LSTM(object):
+class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
     """
     hard-coded to two layers at the moment
     """
-    def __init__(self, input_dim, hidden_dim, a):
+    yaml_tag = '!HM_LSTMTransducer'
+    @register_xnmt_handler
+    @serializable_init
+    def __init__(self,
+                 input_dim,
+                 hidden_dim,
+                 a,
+                 bottom_layer=None,
+                 top_layer=None):
         self.input_dim  = input_dim
         self.hidden_dim = hidden_dim
-        self.a = a  #slope annealing
+        self.a = a  #for slope annealing
+        self.bottom_layer = HM_LSTMCell(input_dim=input_dim,
+                                        hidden_dim=hidden_dim,
+                                        above_dim=hidden_dim,
+                                        a=a,
+                                        last_layer=False)
+        self.top_layer    = HM_LSTMCell(input_dim=hidden_dim,
+                                        hidden_dim=hidden_dim,
+                                        above_dim=None,
+                                        a=a,
+                                        last_layer=True)
         
-        self.cell_1 = HM_LSTMCell(self.input_dim, self.hidden_dim, self.hidden_dim, self.a, last_layer=False)
-        self.cell_2 = HM_LSTMCell(self.hidden_dim, self.hidden_dim, None, self.a, last_layer=True)
-        
-#?? map to this format
-#    def transduce(self, xs: 'expression_seqs.ExpressionSequence') -> 'expression_seqs.ExpressionSequence':  
-    def forward(self, inputs, hidden):
-        time_steps = 2
-        batch_size = 1
-        if hidden == None:
-            h_t1 = [dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)] #?? is this [hidden_dim, batch_size] ?
-            c_t1 = [dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)]
-            z_t1 = [dy.zeroes(dim=(1,), batch_size=batch_size)] #?? correct data structure/dims?
-            h_t2 = [dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)]
-            c_t2 = [dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)]
-            z_t1 = [dy.zeroes(dim=(1,), batch_size=batch_size)]
-        else:
-            (h_t1, c_t1, z_t1, h_t2, c_t2, z_t2) = hidden
 
-        z_one = dy.ones(1, batch_size) #?? checkme.
-        h_1 = []
-        h_2 = []
-        z_1 = []
-        z_2 = []
+    @handle_xnmt_event
+    def on_start_sent(self, *args, **kwargs):
+        self._final_states = None
+
+    def get_final_states(self):
+        assert self._final_states is not None, "transduce() must be invoked before get_final_states()"
+        return self._final_states
+    
+
+    def transduce(self, xs: 'expression_seqs.ExpressionSequence') -> 'expression_seqs.ExpressionSequence':  
         
-        for t in range(time_steps):
-            #?? h_below inputs = expr_seq?? for layer 1?
-            h_t1, c_t1, z_t1, g_t1 = self.cell_1(c=c_t1, h_below=inputs_at_x_t, h=h_t1, h_above=h_t2, z=z_t1, z_below=z_one)
-            h_t2, c_t2, z_t2, g_t2 = self.cell_2(c=c_t2, h_below=h_t1, h=h_t2, h_above=None, z=z_t2, z_below=z_t1)
-            h_1.append(h_t1)
-            h_2.append(h_t2)
-            z_1.append(z_t1) #?? checkme. [z_t1]?
-            z_2.append(z_t2)
-                    
-        hidden = (h_t1, c_t1, z_t1, h_t2, c_t2, z_t2)
-        g_t = (g_t1, g_t2)
+        batch_size = xs[0][0].dim()[1]
+        h_bot = []
+        h_top = []
+        z_bot = []
+        z_top = []
+
+        #?? checkme. want to init z to ones? (cherry paper)
+        z_one   = dy.ones(1, batch_size)
+        h_t_bot = [dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)]
+        z_t_bot = [dy.zeroes(dim=(1,), batch_size=batch_size)]
+        h_t_top = [dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)]
+        z_t_top = [dy.zeroes(dim=(1,), batch_size=batch_size)]
+        
+        for i, x_t in enumerate(xs):
+            h_t_bot, z_t_bot = self.bottom_layer(h_below=x_t, h=h_t_bot, h_above=h_t_top, z=z_t_bot, z_below=z_one) #uses h_t_top from layer above@previous time step, h_t_bot and z_t_bot from previous time step
+            h_t_top, z_t_top = self.top_layer(h_below=h_t_bot, h=h_t_top, h_above=None, z=z_t_top, z_below=z_t_bot) #uses z_t_bot and h_t_bot from previous layer call, h_t_top and z_t_top from previous time step
             
-        return h_t1, c_t1, z_t1, h_t2, c_t2, z_t2, g_t1, g_t2
+            h_bot.append(h_t_bot)
+            z_bot.append(z_t_bot)
+            h_top.append(h_t_top)
+            z_top.append(z_t_top)
+
+        #?? final state should be h_top[-1], or?
+        self._final_states = [transducers.FinalTransducerState(h_top[-1])]
+        return h_top
