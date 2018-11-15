@@ -12,15 +12,16 @@ from xnmt.transducers import base as transducers
 from xnmt.persistence import serializable_init, Serializable, Ref, bare
 
 
-#?? yaml_tags, @register_xnmt_handler, @serializable_init
+#?? yaml_tags / save_processed arg / serializable for HMLSTM. did not want it to be callable from yaml; but error messages led me to the current setup. tried to copy CustomLSTMSeqTransducer but got error messages
 #?? param_init for c,h,z
 #?? slope annealing
 
-class HMLSTMCell(object):
+class HMLSTMCell(transducers.SeqTransducer, Serializable):
     """
     single layer HM implementation to enable HM_LSTMTransducer
     https://arxiv.org/pdf/1609.01704.pdf
     """
+    yaml_tag = '!HMLSTMCell'
     @serializable_init
     def __init__(self,
                  input_dim,
@@ -35,6 +36,7 @@ class HMLSTMCell(object):
         self.above_dim  = above_dim
         self.last_layer = last_layer
         self.a = a  #for slope annealing
+#        self.save_processed_arg("last_layer", self.last_layer)
         model = ParamManager.my_params(self)
 
         self.p_W_1l_r = model.add_parameters(dim=(hidden_dim*4 + 1, hidden_dim), init=param_init.initializer((hidden_dim*4 + 1, hidden_dim)))
@@ -44,9 +46,10 @@ class HMLSTMCell(object):
         self.p_bias = model.add_parameters(dim=(hidden_dim*4 + 1,), init=bias_init.initializer((hidden_dim*4 + 1,)))
 
         # to track prev timestep c, h, & z values for this layer
-        self.c = dy.zeroes(dim=(network.hidden_dim,)) #?? does (hidden,) take care of batch_size?
-        self.h = dy.zeroes(dim=(network.hidden_dim,))
+        self.c = dy.zeroes(dim=(self.hidden_dim,)) #?? does (hidden,) take care of batch_size?
+        self.h = dy.zeroes(dim=(self.hidden_dim,))
         self.z = dy.ones(dim=(1,))
+
 
     #todo: annealing schedule for a: `annealing the slope of the hard binarizer from 1.0 to 5.0 over 80k minibatches'
     def hard_sigmoid_slope_anneal(x, a=1.0):
@@ -54,21 +57,20 @@ class HMLSTMCell(object):
         output = np.clip(tmp, a_min=0, a_max=1) #?? can i do this to a dynet object? is there another way?
         return output
 
-
     #xs = input / h_below
     def transduce(self, h_below: 'expression_seqs.ExpressionSequence', h_above, z_below) -> 'expression_seqs.ExpressionSequence':
         W_1l_r  = dy.parameter(self.p_W_1l_r)
         bias = dy.parameter(self.p_bias)
         
-        s_recur = W_11_r * self.h  #matrix multiply is *, element-wise is dy.cmult
+        s_recur = W_1l_r * self.h #matrix multiply is *, element-wise is dy.cmult. CURRERROR: stale expression
         if not self.last_layer:
             W_2l_td = dy.parameter(self.p_W_2l_td)
             W_0l_bu = dy.parameter(self.p_W_0l_bu)
-            s_bottomup = W_01_bu * h_below
-            s_topdown  = W_21_td * h_above
+            s_bottomup = W_0l_bu * h_below
+            s_topdown  = W_2l_td * h_above
         else:
             s_topdown  = dy.zeroes(s_recur.dim()) #?? this gets the shape e.g. ((5, 1), 1). do i actually want batch_size as well?
-            s_bottomup = W_11_r * self.h
+            s_bottomup = W_1l_r * self.h
         s_bottomup = z_below * s_bottomup 
         s_topdown  = self.z * s_topdown  #will be zeros if last_layer. is this right, or should z=1 in this case ??
         
@@ -158,8 +160,8 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
         z_t_top = [dy.zeroes(dim=(1,), batch_size=batch_size)]
         
         for i, x_t in enumerate(xs):
-            h_t_bot, z_t_bot = self.bottom_layer(h_below=x_t, h=h_t_bot, h_above=h_t_top, z=z_t_bot, z_below=z_one) #uses h_t_top from layer above@previous time step, h_t_bot and z_t_bot from previous time step
-            h_t_top, z_t_top = self.top_layer(h_below=h_t_bot, h=h_t_top, h_above=None, z=z_t_top, z_below=z_t_bot) #uses z_t_bot and h_t_bot from previous layer call, h_t_top and z_t_top from previous time step
+            h_t_bot, z_t_bot = self.bottom_layer.transduce(h_below=x_t, h_above=h_t_top, z_below=z_one) #uses h_t_top from layer above@previous time step, h_t_bot and z_t_bot from previous time step (saved in hmlstmcell)
+            h_t_top, z_t_top = self.top_layer.transduce(h_below=h_t_bot, h_above=None, z_below=z_t_bot) #uses z_t_bot and h_t_bot from previous layer call, h_t_top and z_t_top from previous time step (saved in hmlstmcell)
             
             h_bot.append(h_t_bot)
             z_bot.append(z_t_bot)
