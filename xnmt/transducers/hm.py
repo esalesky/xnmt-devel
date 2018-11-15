@@ -4,7 +4,7 @@ from typing import List
 import numpy as np
 import dynet as dy
 
-from xnmt import expression_seqs
+from xnmt import expression_seqs, param_initializers
 from xnmt.events import register_xnmt_handler, handle_xnmt_event
 from xnmt.param_collections import ParamManager
 from xnmt.param_initializers import GlorotInitializer, ZeroInitializer
@@ -16,20 +16,21 @@ from xnmt.persistence import serializable_init, Serializable, Ref, bare
 #?? param_init for c,h,z
 #?? slope annealing
 
-class HM_LSTMCell(object):
+class HMLSTMCell(object):
     """
     single layer HM implementation to enable HM_LSTMTransducer
     https://arxiv.org/pdf/1609.01704.pdf
     """
+    @serializable_init
     def __init__(self,
-                 below_dim,
+                 input_dim,
                  hidden_dim,
                  above_dim,
                  a,
                  last_layer,
                  param_init=Ref("exp_global.param_init", default=bare(GlorotInitializer)),
                  bias_init=Ref("exp_global.bias_init", default=bare(ZeroInitializer))):
-        self.below_dim  = below_dim
+        self.input_dim  = input_dim
         self.hidden_dim = hidden_dim
         self.above_dim  = above_dim
         self.last_layer = last_layer
@@ -37,9 +38,9 @@ class HM_LSTMCell(object):
         model = ParamManager.my_params(self)
 
         self.p_W_1l_r = model.add_parameters(dim=(hidden_dim*4 + 1, hidden_dim), init=param_init.initializer((hidden_dim*4 + 1, hidden_dim)))
-        if not self.last layer:
+        if not self.last_layer:
             self.p_W_2l_td = model.add_parameters(dim=(hidden_dim*4 + 1, above_dim), init=param_init.initializer((hidden_dim*4 + 1, above_dim)))
-        self.p_W_0l_bu = model.add_parameters(dim=(hidden_dim*4 + 1, below_dim), init=param_init.initializer((hidden_dim*4 + 1, below_dim)))
+        self.p_W_0l_bu = model.add_parameters(dim=(hidden_dim*4 + 1, input_dim), init=param_init.initializer((hidden_dim*4 + 1, input_dim)))
         self.p_bias = model.add_parameters(dim=(hidden_dim*4 + 1,), init=bias_init.initializer((hidden_dim*4 + 1,)))
 
         # to track prev timestep c, h, & z values for this layer
@@ -48,7 +49,7 @@ class HM_LSTMCell(object):
         self.z = dy.ones(dim=(1,))
 
     #todo: annealing schedule for a: `annealing the slope of the hard binarizer from 1.0 to 5.0 over 80k minibatches'
-    def hard_sigmoid_slope_anneal(a=1.0, x):
+    def hard_sigmoid_slope_anneal(x, a=1.0):
         tmp = (a * x + 1.0) / 2.0
         output = np.clip(tmp, a_min=0, a_max=1) #?? can i do this to a dynet object? is there another way?
         return output
@@ -82,7 +83,7 @@ class HM_LSTMCell(object):
         o_t = dy.logistic(i_ot)
         g_t = dy.tanh(i_ut)
         
-        z_tilde = hard_sigmoid_anneal(self.a, fslice[self.hidden_dim*4:self.hidden_dim*4+1, :])  #should be hard sigmoid + slope annealing
+        z_tilde = hard_sigmoid_anneal(fslice[self.hidden_dim*4:self.hidden_dim*4+1, :], self.a)  #should be hard sigmoid + slope annealing
         z_new = dy.round(z_tilde, gradient_mode="straight_through_gradient")  #use straight-through estimator for gradient: step fn forward, hard sigmoid backward
 
         #z = z_l,t-1
@@ -120,16 +121,16 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
         self.input_dim  = input_dim
         self.hidden_dim = hidden_dim
         self.a = a  #for slope annealing
-        self.bottom_layer = HM_LSTMCell(input_dim=input_dim,
-                                        hidden_dim=hidden_dim,
-                                        above_dim=hidden_dim,
-                                        a=a,
-                                        last_layer=False)
-        self.top_layer    = HM_LSTMCell(input_dim=hidden_dim,
-                                        hidden_dim=hidden_dim,
-                                        above_dim=None,
-                                        a=a,
-                                        last_layer=True)
+        self.bottom_layer = HMLSTMCell(input_dim=input_dim,
+                                       hidden_dim=hidden_dim,
+                                       above_dim=hidden_dim,
+                                       a=a,
+                                       last_layer=False)
+        self.top_layer    = HMLSTMCell(input_dim=hidden_dim,
+                                       hidden_dim=hidden_dim,
+                                       above_dim=None,
+                                       a=a,
+                                       last_layer=True)
         
 
     @handle_xnmt_event
