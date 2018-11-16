@@ -20,7 +20,7 @@ from xnmt.persistence import serializable_init, Serializable, Ref, bare
 def hard_sigmoid_anneal(zz, a=1.0):
     tmp = ((a * zz) + 1.0) / 2.0 #todo: clip to [0,1]
     return tmp
-##    output = np.clip(tmp, a_min=0, a_max=1) #?? can i do this to a dynet object? is there another way?
+##    output = np.clip(tmp, a_min=0, a_max=1) #?? can i do this to a dynet object? [no]. is there another way? [yes, tbd non-messy way]
 #    if tmp.value() > 1:
 #        return dy.ones(dim=1,)
 #    elif tmp.value() < 0:
@@ -138,16 +138,20 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
         self.input_dim  = input_dim
         self.hidden_dim = hidden_dim
         self.a = a  #for slope annealing
-        self.bottom_layer = HMLSTMCell(input_dim=input_dim,
-                                       hidden_dim=hidden_dim,
-                                       above_dim=hidden_dim,
-                                       a=a,
-                                       last_layer=False)
-        self.top_layer    = HMLSTMCell(input_dim=hidden_dim,
-                                       hidden_dim=hidden_dim,
-                                       above_dim=None,
-                                       a=a,
-                                       last_layer=True)
+        self.bottom_layer = self.add_serializable_component("bottom_layer", bottom_layer,
+                                                            lambda: HMLSTMCell(input_dim=input_dim,
+                                                                               hidden_dim=hidden_dim,
+                                                                               above_dim=hidden_dim,
+                                                                               a=a,
+                                                                               last_layer=False))
+        self.top_layer    = self.add_serializable_component("top_layer", top_layer,
+                                                            lambda: HMLSTMCell(input_dim=hidden_dim,
+                                                                               hidden_dim=hidden_dim,
+                                                                               above_dim=None,
+                                                                               a=a,
+                                                                               last_layer=True))
+        self.modules = [self.bottom_layer, self.top_layer]
+
         
 
     @handle_xnmt_event
@@ -159,16 +163,22 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
         return self._final_states
     
 
-    def transduce(self, xs: 'expression_seqs.ExpressionSequence') -> 'expression_seqs.ExpressionSequence':  
-        
+    def transduce(self, xs: 'expression_seqs.ExpressionSequence') -> 'expression_seqs.ExpressionSequence':          
         batch_size = xs[0][0].dim()[1]
         h_bot = []
         h_top = []
         z_bot = []
         z_top = []
 
+        self.top_layer.h = None
+        self.top_layer.c = None
+        self.top_layer.z = None
+        self.bottom_layer.h = None
+        self.bottom_layer.c = None
+        self.bottom_layer.z = None
+
         #?? checkme. want to init z to ones? (cherry paper)
-        z_one   = dy.ones(1, batch_size=batch_size)
+        z_one = dy.ones(1, batch_size=batch_size)
         h_bot.append(dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)) #indices for timesteps are +1
         h_top.append(dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size))
         
