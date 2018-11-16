@@ -16,6 +16,18 @@ from xnmt.persistence import serializable_init, Serializable, Ref, bare
 #?? param_init for c,h,z
 #?? slope annealing
 
+#todo: annealing schedule for a: `annealing the slope of the hard binarizer from 1.0 to 5.0 over 80k minibatches'
+def hard_sigmoid_anneal(zz, a=1.0):
+    print(zz.dim())
+    tmp = ((a * zz) + 1.0) / 2.0
+#    output = np.clip(tmp, a_min=0, a_max=1) #?? can i do this to a dynet object? is there another way?
+    if tmp.value() > 1:
+        return dy.ones(dim=1,)
+    elif tmp.value() < 0:
+        return dy.zeroes(dim=1,)
+    else:
+        return tmp
+
 class HMLSTMCell(transducers.SeqTransducer, Serializable):
     """
     single layer HM implementation to enable HM_LSTMTransducer
@@ -46,19 +58,18 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         self.p_bias = model.add_parameters(dim=(hidden_dim*4 + 1,), init=bias_init.initializer((hidden_dim*4 + 1,)))
 
         # to track prev timestep c, h, & z values for this layer
-        self.c = dy.zeroes(dim=(self.hidden_dim,)) #?? does (hidden,) take care of batch_size?
-        self.h = dy.zeroes(dim=(self.hidden_dim,))
-        self.z = dy.ones(dim=(1,))
+        self.c = None
+        self.h = None
+        self.z = None
 
-
-    #todo: annealing schedule for a: `annealing the slope of the hard binarizer from 1.0 to 5.0 over 80k minibatches'
-    def hard_sigmoid_slope_anneal(x, a=1.0):
-        tmp = (a * x + 1.0) / 2.0
-        output = np.clip(tmp, a_min=0, a_max=1) #?? can i do this to a dynet object? is there another way?
-        return output
 
     #xs = input / h_below
     def transduce(self, h_below: 'expression_seqs.ExpressionSequence', h_above, z_below) -> 'expression_seqs.ExpressionSequence':
+        if self.c == None:
+            self.c = dy.zeroes(dim=(self.hidden_dim,)) #?? does (hidden,) take care of batch_size?
+            self.h = dy.zeroes(dim=(self.hidden_dim,))
+            self.z = dy.ones(dim=(1,))
+
         W_1l_r  = dy.parameter(self.p_W_1l_r)
         bias = dy.parameter(self.p_bias)
         
@@ -66,13 +77,21 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         if not self.last_layer:
             W_2l_td = dy.parameter(self.p_W_2l_td)
             W_0l_bu = dy.parameter(self.p_W_0l_bu)
-            s_bottomup = W_0l_bu * h_below
+#            print(W_0l_bu.dim())
+#            print(h_below.dim())
+            s_bottomup = W_0l_bu * h_below #?? this is becoming (2049,). does it need to be (2049,1) to do scalar * matrix?
+#            print(s_bottomup.dim())
+#            print(z_below.dim())
+#            print(self.last_layer)
             s_topdown  = W_2l_td * h_above
         else:
-            s_topdown  = dy.zeroes(s_recur.dim()) #?? this gets the shape e.g. ((5, 1), 1). do i actually want batch_size as well?
+            s_topdown  = dy.zeroes(s_recur.dim(),) #?? this gets the shape e.g. ((5, 1), 1). do i actually want batch_size as well?
             s_bottomup = W_1l_r * self.h
-        s_bottomup = z_below * s_bottomup 
-        s_topdown  = self.z * s_topdown  #will be zeros if last_layer. is this right, or should z=1 in this case ??
+#        zb_expand = z_below * dy.ones(dim=(z_below.dim()[1],self.hidden_dim*4+1)) #?? batch size handled? this should output z tiled to batch_size
+#        print(zb_expand.dim())
+#        s_bottomup = dy.mult(zb_expand, s_bottomup)
+        s_bottomup = dy.cmult(z_below,s_bottomup) #to handle batched scalar * matrix -> e.g. (1x10, 2049x10)
+        s_topdown  = dy.cmult(self.z,s_topdown)  #will be zeros if last_layer. is this right, or should z=1 in this case ??
         
         fslice = s_recur + s_topdown + s_bottomup + bias #?? checkme. bias has same shape as s_recur et al? [4*hidden+1, batch_size]?
 
@@ -83,9 +102,12 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         f_t = dy.logistic(i_ft + 1.0)  #+1.0 bc a paper said it was better to init that way (matthias)
         i_t = dy.logistic(i_it)
         o_t = dy.logistic(i_ot)
-        g_t = dy.tanh(i_ut)
-        
-        z_tilde = hard_sigmoid_anneal(fslice[self.hidden_dim*4:self.hidden_dim*4+1, :], self.a)  #should be hard sigmoid + slope annealing
+        g_t = dy.tanh(i_gt)
+
+        z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
+        print(z_tmp.dim())
+        print("--")
+        z_tilde = hard_sigmoid_anneal(z_tmp,self.a)  #should be hard sigmoid + slope annealing
         z_new = dy.round(z_tilde, gradient_mode="straight_through_gradient")  #use straight-through estimator for gradient: step fn forward, hard sigmoid backward
 
         #z = z_l,t-1
@@ -147,20 +169,22 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
     def transduce(self, xs: 'expression_seqs.ExpressionSequence') -> 'expression_seqs.ExpressionSequence':  
         
         batch_size = xs[0][0].dim()[1]
+        print("BATCH_SIZE %d" % batch_size)
         h_bot = []
         h_top = []
         z_bot = []
         z_top = []
 
         #?? checkme. want to init z to ones? (cherry paper)
-        z_one   = dy.ones(1, batch_size)
-        h_t_bot = [dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)]
-        z_t_bot = [dy.zeroes(dim=(1,), batch_size=batch_size)]
-        h_t_top = [dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)]
-        z_t_top = [dy.zeroes(dim=(1,), batch_size=batch_size)]
+        z_one   = dy.ones(1, batch_size=batch_size)
+        h_bot.append(dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)) #indices for timesteps are +1
+        h_top.append(dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size))
+#        z_one   = dy.ones(dim=(1,))
+#        h_bot.append(dy.zeroes(dim=(self.hidden_dim,),))
+#        h_top.append(dy.zeroes(dim=(self.hidden_dim,),))
         
         for i, x_t in enumerate(xs):
-            h_t_bot, z_t_bot = self.bottom_layer.transduce(h_below=x_t, h_above=h_t_top, z_below=z_one) #uses h_t_top from layer above@previous time step, h_t_bot and z_t_bot from previous time step (saved in hmlstmcell)
+            h_t_bot, z_t_bot = self.bottom_layer.transduce(h_below=x_t, h_above=h_top[i], z_below=z_one) #uses h_t_top from layer above@previous time step, h_t_bot and z_t_bot from previous time step (saved in hmlstmcell)
             h_t_top, z_t_top = self.top_layer.transduce(h_below=h_t_bot, h_above=None, z_below=z_t_bot) #uses z_t_bot and h_t_bot from previous layer call, h_t_top and z_t_top from previous time step (saved in hmlstmcell)
             
             h_bot.append(h_t_bot)
@@ -168,6 +192,6 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
             h_top.append(h_t_top)
             z_top.append(z_t_top)
 
-        #?? final state should be h_top[-1], or?
+        #final state is last hidden state from top layer
         self._final_states = [transducers.FinalTransducerState(h_top[-1])]
-        return h_top
+        return h_top[1:] #removes the init zeros to make it same length as seq
