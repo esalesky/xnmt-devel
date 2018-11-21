@@ -99,8 +99,11 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         o_t = dy.logistic(i_ot)
         g_t = dy.tanh(i_gt)
 
-        z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
-        z_tilde = dy.logistic(z_tmp)  #original: hard sigmoid + slope annealing (a)
+        if z_below == 0:
+            z_tilde = dy.zeroes(dim=(1,)) #ensure that copied nodes don't set z=1 at a higher layer (hierarchical structure)
+        else:
+            z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
+            z_tilde = dy.logistic(z_tmp)  #original: hard sigmoid + slope annealing (a)
         z_new = dy.round(z_tilde, gradient_mode="straight_through_gradient")  #use straight-through estimator for gradient: step fn forward, hard sigmoid backward
 
         #z = z_l,t-1
