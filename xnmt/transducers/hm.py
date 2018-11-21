@@ -21,10 +21,10 @@ def hard_sigmoid_anneal(zz, a=1.0):
     tmp = ((a * zz) + 1.0) / 2.0 #todo: clip to [0,1]
     return tmp
 ##    output = np.clip(tmp, a_min=0, a_max=1) #?? can i do this to a dynet object? [no]. is there another way? [yes, tbd non-messy way]
-#    if tmp.value() > 1:
-#        return dy.ones(dim=1,)
-#    elif tmp.value() < 0:
-#        return dy.zeroes(dim=1,)
+#    if max(tmp.value()) > 1:
+#        return 
+#    elif min(tmp.value()) < 0:
+#        return 
 #    else:
 #        return tmp
 
@@ -100,15 +100,18 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         g_t = dy.tanh(i_gt)
 
         z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
-        z_tilde = hard_sigmoid_anneal(z_tmp,self.a)  #should be hard sigmoid + slope annealing
+        z_tilde = dy.logistic(z_tmp)  #original: hard sigmoid + slope annealing (a)
         z_new = dy.round(z_tilde, gradient_mode="straight_through_gradient")  #use straight-through estimator for gradient: step fn forward, hard sigmoid backward
 
         #z = z_l,t-1
         #z_below = z_l-1,t
-        if self.z == 1: #FLUSH
-            c_new = dy.cmult(i_t, g_t)
-            h_new = dy.cmult(o_t, dy.tanh(c_new))
-        elif z_below == 0: #COPY
+
+#        if self.z == 1: #FLUSH
+#            c_new = dy.cmult(i_t, g_t)
+#            h_new = dy.cmult(o_t, dy.tanh(c_new))
+#        elif z_below == 0: #COPY
+        # if flush removed, copy or normal update
+        if z_below == 0: #COPY
             c_new = self.c
             h_new = self.h
         else: #UPDATE
@@ -124,7 +127,7 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
 
 class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
     """
-    hard-coded to two layers at the moment
+    hard-coded to three layers at the moment
     """
     yaml_tag = '!HM_LSTMTransducer'
     @register_xnmt_handler
@@ -132,8 +135,9 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
     def __init__(self,
                  input_dim,
                  hidden_dim,
-                 a,
+                 a=1,
                  bottom_layer=None,
+                 mid_layer=None,
                  top_layer=None):
         self.input_dim  = input_dim
         self.hidden_dim = hidden_dim
@@ -144,13 +148,19 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
                                                                                above_dim=hidden_dim,
                                                                                a=a,
                                                                                last_layer=False))
+        self.mid_layer = self.add_serializable_component("mid_layer", mid_layer,
+                                                         lambda: HMLSTMCell(input_dim=hidden_dim,
+                                                                            hidden_dim=hidden_dim,
+                                                                            above_dim=hidden_dim,
+                                                                            a=a,
+                                                                            last_layer=False))
         self.top_layer    = self.add_serializable_component("top_layer", top_layer,
                                                             lambda: HMLSTMCell(input_dim=hidden_dim,
                                                                                hidden_dim=hidden_dim,
                                                                                above_dim=None,
                                                                                a=a,
                                                                                last_layer=True))
-        self.modules = [self.bottom_layer, self.top_layer]
+        self.modules = [self.bottom_layer, self.mid_layer, self.top_layer]
 
         
 
@@ -166,13 +176,18 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
     def transduce(self, xs: 'expression_seqs.ExpressionSequence') -> 'expression_seqs.ExpressionSequence':          
         batch_size = xs[0][0].dim()[1]
         h_bot = []
+        h_mid = []
         h_top = []
         z_bot = []
+        z_mid = []
         z_top = []
 
         self.top_layer.h = None
         self.top_layer.c = None
         self.top_layer.z = None
+        self.mid_layer.h = None
+        self.mid_layer.c = None
+        self.mid_layer.z = None
         self.bottom_layer.h = None
         self.bottom_layer.c = None
         self.bottom_layer.z = None
@@ -180,16 +195,31 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
         #?? checkme. want to init z to ones? (cherry paper)
         z_one = dy.ones(1, batch_size=batch_size)
         h_bot.append(dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size)) #indices for timesteps are +1
+        h_mid.append(dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size))
         h_top.append(dy.zeroes(dim=(self.hidden_dim,), batch_size=batch_size))
         
         for i, x_t in enumerate(xs):
-            h_t_bot, z_t_bot = self.bottom_layer.transduce(h_below=x_t, h_above=h_top[i], z_below=z_one) #uses h_t_top from layer above@previous time step, h_t_bot and z_t_bot from previous time step (saved in hmlstmcell)
-            h_t_top, z_t_top = self.top_layer.transduce(h_below=h_t_bot, h_above=None, z_below=z_t_bot) #uses z_t_bot and h_t_bot from previous layer call, h_t_top and z_t_top from previous time step (saved in hmlstmcell)
+            h_t_bot, z_t_bot = self.bottom_layer.transduce(h_below=x_t, h_above=h_mid[i], z_below=z_one) #uses h_t_top from layer above@previous time step, h_t_bot and z_t_bot from previous time step (saved in hmlstmcell)
+            h_t_mid, z_t_mid = self.mid_layer.transduce(h_below=h_t_bot, h_above=h_top[i], z_below=z_t_bot) #uses h_t_top from layer above@previous time step, h_t_bot and z_t_bot from previous time step (saved in hmlstmcell)
+            h_t_top, z_t_top = self.top_layer.transduce(h_below=h_t_mid, h_above=None, z_below=z_t_mid) #uses z_t_bot and h_t_bot from previous layer call, h_t_top and z_t_top from previous time step (saved in hmlstmcell)
             
             h_bot.append(h_t_bot)
             z_bot.append(z_t_bot)
+            h_mid.append(h_t_mid)
+            z_mid.append(z_t_mid)
             h_top.append(h_t_top)
             z_top.append(z_t_top)
+
+#        #gated output module
+#
+#        #sigmoid
+#        W_layer = dy.parameters(dim=(len(self.modules), hidden_dim)) #needs to be moved to init? num layers by hidden_dim
+#        h_cat   = dy.transpose(dy.concatenate([h_bot, h_mid, h_top]))
+#        dotted  = dy.dot_product(e1, e2)
+#        gates   = dy.logistic(dotted)
+#        #relu
+#        
+#        om = dy.relu()
 
         #final state is last hidden state from top layer
         self._final_states = [transducers.FinalTransducerState(h_top[-1])]
