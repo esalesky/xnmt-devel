@@ -40,6 +40,7 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
                  hidden_dim,
                  above_dim,
                  a,
+                 hier,
                  last_layer,
                  param_init=Ref("exp_global.param_init", default=bare(GlorotInitializer)),
                  bias_init=Ref("exp_global.bias_init", default=bare(ZeroInitializer))):
@@ -48,6 +49,7 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         self.above_dim  = above_dim
         self.last_layer = last_layer
         self.a = a  #for slope annealing
+        self.hier = hier
 #        self.save_processed_arg("last_layer", self.last_layer)
         model = ParamManager.my_params(self)
 
@@ -99,7 +101,7 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         o_t = dy.logistic(i_ot)
         g_t = dy.tanh(i_gt)
 
-        if z_below == 0:
+        if self.hier==True and z_below == 0:
             z_tilde = dy.zeroes(dim=(1,)) #ensure that copied nodes don't set z=1 at a higher layer (hierarchical structure)
         else:
             z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
@@ -138,6 +140,7 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
     def __init__(self,
                  input_dim,
                  hidden_dim,
+                 hier=False,
                  a=1,
                  bottom_layer=None,
                  mid_layer=None,
@@ -150,18 +153,21 @@ class HM_LSTMTransducer(transducers.SeqTransducer, Serializable):
                                                                                hidden_dim=hidden_dim,
                                                                                above_dim=hidden_dim,
                                                                                a=a,
+                                                                               hier=hier,
                                                                                last_layer=False))
-        self.mid_layer = self.add_serializable_component("mid_layer", mid_layer,
-                                                         lambda: HMLSTMCell(input_dim=hidden_dim,
-                                                                            hidden_dim=hidden_dim,
-                                                                            above_dim=hidden_dim,
-                                                                            a=a,
-                                                                            last_layer=False))
+        self.mid_layer    = self.add_serializable_component("mid_layer", mid_layer,
+                                                            lambda: HMLSTMCell(input_dim=hidden_dim,
+                                                                               hidden_dim=hidden_dim,
+                                                                               above_dim=hidden_dim,
+                                                                               a=a,
+                                                                               hier=hier,
+                                                                               last_layer=False))
         self.top_layer    = self.add_serializable_component("top_layer", top_layer,
                                                             lambda: HMLSTMCell(input_dim=hidden_dim,
                                                                                hidden_dim=hidden_dim,
                                                                                above_dim=None,
                                                                                a=a,
+                                                                               hier=hier,
                                                                                last_layer=True))
         self.modules = [self.bottom_layer, self.mid_layer, self.top_layer]
 
