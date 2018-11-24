@@ -101,7 +101,7 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         o_t = dy.logistic(i_ot)
         g_t = dy.tanh(i_gt)
 
-        if self.hier==True and z_below == 0:
+        if self.hier==True and z_below.value() == 0:
             z_tilde = dy.zeroes(dim=(1,)) #ensure that copied nodes don't set z=1 at a higher layer (hierarchical structure)
         else:
             z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
@@ -111,12 +111,12 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         #z = z_l,t-1
         #z_below = z_l-1,t
 
-#        if self.z == 1: #FLUSH
+#        if self.z.value() == 1: #FLUSH
 #            c_new = dy.cmult(i_t, g_t)
 #            h_new = dy.cmult(o_t, dy.tanh(c_new))
-#        elif z_below == 0: #COPY
+#        elif z_below.value() == 0: #COPY
         # if flush removed, copy or normal update
-        if z_below == 0: #COPY
+        if z_below.value() == 0: #COPY
             c_new = self.c
             h_new = self.h
         else: #UPDATE
