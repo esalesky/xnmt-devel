@@ -15,12 +15,12 @@ class ZhangSeqTransducer(transducers.ModularSeqTransducer, Serializable):
   def __init__(self,
                input_dim, hidden_dim,
                dropout=Ref("exp_global.dropout", default=0.0),
-               bottom_layer=None, top_layer=None):
+               bottom_layer=None, top_layer=None, stride=2):
     self.bottom_layer = self.add_serializable_component("bottom_layer", bottom_layer,
                                                         lambda: NinBiLSTMTransducer(layers=2,
                                                                                     input_dim=input_dim,
                                                                                     hidden_dim=hidden_dim,
-                                                                                    stride=2,
+                                                                                    stride=stride,
                                                                                     dropout=dropout))
     self.top_layer = self.add_serializable_component("top_layer", top_layer,
                                                      lambda: recurrent.BiLSTMSeqTransducer(layers=1,
