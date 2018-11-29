@@ -101,11 +101,17 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         o_t = dy.logistic(i_ot)
         g_t = dy.tanh(i_gt)
 
-        if self.hier==True and z_below.value() == 0:
-            z_tilde = dy.zeroes(dim=(1,)) #ensure that copied nodes don't set z=1 at a higher layer (hierarchical structure)
-        else:
-            z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
-            z_tilde = dy.logistic(z_tmp)  #original: hard sigmoid + slope annealing (a)
+
+        #z * normal_update + (1-z)*copy: ie, when z_below is 0, z_new = z (copied prev timestamp). when z_below is 1, z_new = dy.round etc
+
+        #hier = True
+#        z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
+#        z_tilde = dy.logistic(z_tmp)  #original: hard sigmoid + slope annealing (a)
+#        z_new = (1-z_below) * self.z + z_below * dy.round(z_tilde, gradient_mode="straight_through_gradient")
+        
+        #hier = False
+        z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
+        z_tilde = dy.logistic(z_tmp)  #original: hard sigmoid + slope annealing (a)
         z_new = dy.round(z_tilde, gradient_mode="straight_through_gradient")  #use straight-through estimator for gradient: step fn forward, hard sigmoid backward
 
         #z = z_l,t-1
@@ -115,13 +121,18 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
 #            c_new = dy.cmult(i_t, g_t)
 #            h_new = dy.cmult(o_t, dy.tanh(c_new))
 #        elif z_below.value() == 0: #COPY
-        # if flush removed, copy or normal update
-        if z_below.value() == 0: #COPY
-            c_new = self.c
-            h_new = self.h
-        else: #UPDATE
-            c_new = dy.cmult(f_t, self.c) + dy.cmult(i_t, g_t)
-            h_new = dy.cmult(o_t, dy.tanh(c_new))
+
+        # if flush removed, only copy or normal update
+        # when z_below is 0, c_new and h_new are self.c and self.h. when z_below is 1, c_new, h_new = normal update
+        c_new = (1-z_below) * self.c + z_below * (dy.cmult(f_t, self.c) + dy.cmult(i_t, g_t))
+        h_new = (1-z_below) * self.h + z_below * dy.cmult(o_t, dy.tanh(c_new))
+        
+#        if z_below.value() == 0: #COPY
+#            c_new = self.c
+#            h_new = self.h
+#        else: #UPDATE
+#            c_new = dy.cmult(f_t, self.c) + dy.cmult(i_t, g_t)
+#            h_new = dy.cmult(o_t, dy.tanh(c_new))
         
         self.c = c_new
         self.h = h_new
