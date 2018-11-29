@@ -107,7 +107,7 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
         #hier = True
 #        z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
 #        z_tilde = dy.logistic(z_tmp)  #original: hard sigmoid + slope annealing (a)
-#        z_new = (1-z_below) * self.z + z_below * dy.round(z_tilde, gradient_mode="straight_through_gradient")
+#        z_new = dy.cmult(1-z_below, self.z) + dy.cmult(z_below, dy.round(z_tilde, gradient_mode="straight_through_gradient"))
         
         #hier = False
         z_tmp = dy.pick_range(fslice, self.hidden_dim*4,self.hidden_dim*4+1)
@@ -124,8 +124,8 @@ class HMLSTMCell(transducers.SeqTransducer, Serializable):
 
         # if flush removed, only copy or normal update
         # when z_below is 0, c_new and h_new are self.c and self.h. when z_below is 1, c_new, h_new = normal update
-        c_new = (1-z_below) * self.c + z_below * (dy.cmult(f_t, self.c) + dy.cmult(i_t, g_t))
-        h_new = (1-z_below) * self.h + z_below * dy.cmult(o_t, dy.tanh(c_new))
+        c_new = dy.cmult((1-z_below), self.c) + dy.cmult(z_below, (dy.cmult(f_t, self.c) + dy.cmult(i_t, g_t)))
+        h_new = dy.cmult((1-z_below), self.h) + dy.cmult(z_below, dy.cmult(o_t, dy.tanh(c_new)))
         
 #        if z_below.value() == 0: #COPY
 #            c_new = self.c
