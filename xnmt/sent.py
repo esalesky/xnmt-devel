@@ -189,11 +189,18 @@ class SimpleSentence(ReadableSentence):
     self.vocab = vocab
 
   def __getitem__(self, key):
-    ret = self.words[key]
+    #hack for fisher compoundsents with missing phonemes
+    try:
+      ret = self.words[key]
+    except IndexError:
+      ret = self.pad_token
+      
     if isinstance(ret, list):  # support for slicing
+      raise ValueError("!!! can't safely handle with compound sent hack right now")
       return SimpleSentence(words=ret, idx=self.idx, vocab=self.vocab, score=self.score, output_procs=self.output_procs,
                             pad_token=self.pad_token)
-    return self.words[key]
+    #hack for fisher compoundsents (no slice/list compat):
+    return ret
 
   def sent_len(self):
     return len(self.words)

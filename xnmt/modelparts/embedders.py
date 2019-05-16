@@ -447,11 +447,18 @@ class PositionEmbedder(Embedder, Serializable):
     return expression_seqs.ExpressionSequence(expr_tensor=embeddings, mask=None)
 
 
-class OlFactorEmbedder(Embedder, Serializable):
+
+class FactorEmbedder(Embedder, Serializable):
   """
-  Concatenates results of two other embedders, hardcoded for Noop + SimpleWord
+  This embedder performs no lookups but only passes through the inputs.
+
+  Normally, the input is a Sentence object, which is converted to an expression.
+
+  Args:
+    emb_dim: Size of the inputs
   """
-  yaml_tag = '!OlFactorEmbedder'
+
+  yaml_tag = '!FactorEmbedder'
 
   @events.register_xnmt_handler
   @serializable_init
@@ -520,25 +527,28 @@ class OlFactorEmbedder(Embedder, Serializable):
       ret = dy.noise(ret, self.weight_noise)
     return ret
 
-  def embed_factor_sent(self, x):
+  def embed_factor_sent(self, x, speech_len):
     # single mode
     if not batchers.is_batched(x):
-      embeddings = [self.embed(word) for word in x]
+      embeddings = [self.embed_factor(word) for word in x]
     # minibatch mode
     else:
       embeddings = []
       seq_len = x.sent_len()
       for single_sent in x: assert single_sent.sent_len()==seq_len
-      for word_i in range(seq_len):
+#      for word_i in range(seq_len):
+      for word_i in range(speech_len):
         batch = batchers.mark_as_batch([single_sent[word_i] for single_sent in x])
-        embeddings.append(self.embed(batch))
-    return embeddings
-  
+        embeddings.append(self.embed_factor(batch))
+    return expression_seqs.ExpressionSequence(expr_list=embeddings, mask=x.mask if batchers.is_batched(x) else None)
+
+
   def embed_speech(self, x):
     return dy.inputTensor(x, batched=batchers.is_batched(x))
 
   def embed_speech_sent(self, x):
     # TODO refactor: seems a bit too many special cases that need to be distinguished
+#    x = x.batches[0]
     batched = batchers.is_batched(x)
     first_sent = x[0] if batched else x
     if hasattr(first_sent, "get_array"):
@@ -549,119 +559,37 @@ class OlFactorEmbedder(Embedder, Serializable):
                                            [s for s in x]),
                                            mask=x.mask)
     else:
-      if not batched:
-        embeddings = [self.embed(word) for word in x]
-      else:
-        embeddings = []
-        for word_i in range(x.sent_len()):
-          embeddings.append(self.embed(batchers.mark_as_batch([single_sent[word_i] for single_sent in x])))
-      return embeddings
-
-  def embed(self, x):
-#    print(len(x))
-#    print(type(x))
-#    print(len(x[0]))
-#    if isinstance(x, tuple):
-#      speech = x[0]
-#      factor = x[1]
-#      return dy.concatenate([self.embed_speech(speech),self.embed_factor(factor)])
-#    else:
-###      for s in x:
-###        print(type(s))
-###        print(len(s))
-###      print("end")
-###      catted = [ dy.concatenate([self.embed_speech(s[0]),self.embed_factor(s[1])]) for s in x ]
-#      catted = [ dy.concatenate( [self.embed_speech(x.sents[0]),self.embed_factor(x.sents[1])] ) for s in x ]
-#      catted = [ dy.concatenate( [self.embed_speech(x[0]),self.embed_factor(x[1])] ) for s in x ]
-###      print(len(catted))
-###      print(len(catted[0]))
-      catted = dy.concatenate([x[0],x[1]])
-      return catted
-        
-
-  def embed_sent(self, x):
-    batched = batchers.is_batched(x)
-    if not batched: #ie single compoundsentence, not our case
-      speech_sent = x.sents[0].get_array()
-      factor_sent = x.sents[1]
-      embeddings = [self.embed(word) for word in zip(speech_sent,factor_sent)]
-    else:
-      embeddings = []
-      seq_len = x.sent_len()
-      for single_sent in x: assert single_sent.sent_len()==seq_len
-#      assert len(tmp)==x.batch_size()
-      for word_i in range(seq_len):
-        speech_batch = self.embed_speech_sent(batchers.mark_as_batch([single_sent[word_i] for single_sent in x.batches[0]]))
-        factor_batch = self.embed_factor_sent(batchers.mark_as_batch([single_sent[word_i] for single_sent in x.batches[1]]))
-        embeddings.append(self.embed([speech_batch,factor_batch]))
-    print("-----")
-    return expression_seqs.ExpressionSequence(expr_list=embeddings, mask=x.mask)
-
-
-#      print(x.sent_len())
-#      print(x.batch_size())
-#      print(" -- ")
-#      embeddings = []
-#      for word_i in range(x.sent_len()):
-###        embeddings.append(self.embed(batchers.mark_as_batch([(single_sent.sents[0].get_array()[word_i],single_sent.sents[1][word_i]) for single_sent in x])))
-###--> doesn't go because compoundbatch[idx] gives you compoundsent[idx].
-###        embeddings.append(self.embed(batchers.mark_as_batch([single_sent[word_i] for single_sent in x])))
-#        embeddings.append(self.embed(batchers.mark_as_batch(x[word_i])))
-#    print("-----")
-#    return expression_seqs.ExpressionSequence(expr_list=embeddings, mask=x.mask)
-
-
-#    first_sent = x[0] if batched else x
-#    if hasattr(first_sent, "get_array"):
-#      raise ValueError("!!! expected no get_array")
-#      if not batched:
-#        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=x.get_array())
-#      else:
-#        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=batchers.mark_as_batch(
-#                                           [s for s in x]),
-#                                           mask=x.mask)
-#    else:
-
-
-
-
-class FactorEmbedder(Embedder, Serializable):
-  """
-  This embedder performs no lookups but only passes through the inputs.
-
-  Normally, the input is a Sentence object, which is converted to an expression.
-
-  Args:
-    emb_dim: Size of the inputs
-  """
-
-  yaml_tag = '!FactorEmbedder'
-
-  @serializable_init
-  def __init__(self, emb_dim: Optional[numbers.Integral]) -> None:
-    self.emb_dim = emb_dim
-
-  def embed(self, x):
-    return dy.inputTensor(x, batched=batchers.is_batched(x))
-
-  def embed_sent(self, x):
-    # TODO refactor: seems a bit too many special cases that need to be distinguished
-    x = x.batches[0]
-    batched = batchers.is_batched(x)
-    first_sent = x[0] if batched else x
-    if hasattr(first_sent, "get_array"):
-      if not batched:
-        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=x.get_array())
-      else:
-        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=batchers.mark_as_batch(
-                                           [s for s in x]),
-                                           mask=x.mask)
-    else:
-      if not batched:
-        embeddings = [self.embed(word) for word in x]
-      else:
-        embeddings = []
-        for word_i in range(x.sent_len()):
-          embeddings.append(self.embed(batchers.mark_as_batch([single_sent[word_i] for single_sent in x])))
+      raise ValueError("!! Expected to use above")
       return expression_seqs.ExpressionSequence(expr_list=embeddings, mask=x.mask)
 
+
+  def embed(self, word): raise NotImplementedError("Factor-embedding for individual words not implemented yet.")
+  def embed_sent(self, x):
+    speech_x = x.batches[0]
+    factor_x = x.batches[1]
+
+#    if speech_x.sent_len()!=factor_x.sent_len():
+#      print(speech_x.sent_len())
+#      print(factor_x.sent_len())
+#      if speech_x.sent_len()!=factor_x.sent_len()+4:
+#        print("PROBLEM !!!!!!!!") #ah this is due to concatenated sentences which don't have both phonemes for both parts. shouldn't happen with the kaldi phones i don't think
+#      print("---")
+
+#    if speech_x.sent_len()==factor_x.sent_len():
+#      speech_xs = self.embed_speech_sent(speech_x)
+#      factor_xs = self.embed_factor_sent(factor_x, speech_x.sent_len())
+#    elif speech_x.sent_len()+4==factor_x.sent_len():
+#      speech_xs = self.embed_speech_sent(speech_x)
+#      factor_xs = self.embed_factor_sent(factor_x, speech_x.sent_len())
+#    elif speech_x.sent_len() > factor_x.sent_len():
+#      speech_xs = self.embed_speech_sent(speech_x)
+#      factor_xs = self.embed_factor_sent(factor_x, speech_x.sent_len())
+#    else:
+#      raise ValueError("!! unforseen sent mismatch in factor embedder")
+
+    speech_xs = self.embed_speech_sent(speech_x)
+    factor_xs = self.embed_factor_sent(factor_x, speech_x.sent_len())
+    
+    catted = dy.concatenate([speech_xs.as_tensor(), factor_xs.as_tensor()])
+    output_seq = expression_seqs.ExpressionSequence(expr_tensor=catted, mask=speech_x.mask)
+    return output_seq
