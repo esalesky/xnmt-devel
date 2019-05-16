@@ -151,6 +151,9 @@ class CompoundSentence(Sentence):
       if s.idx != self.idx:
         raise ValueError("CompoundSentence must contain sentences of consistent idx.")
     self.sents = sents
+  def __getitem__(self, key):
+    if not isinstance(key, numbers.Integral): raise NotImplementedError()
+    return [sent[key] for sent in self.sents]
   def sent_len(self) -> int:
     return sum(sent.sent_len() for sent in self.sents)
   def len_unpadded(self) -> int:

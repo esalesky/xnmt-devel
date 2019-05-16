@@ -445,3 +445,223 @@ class PositionEmbedder(Embedder, Serializable):
   def embed_sent(self, sent_len):
     embeddings = dy.strided_select(dy.parameter(self.embeddings), [1,1], [0,0], [self.emb_dim, sent_len])
     return expression_seqs.ExpressionSequence(expr_tensor=embeddings, mask=None)
+
+
+class OlFactorEmbedder(Embedder, Serializable):
+  """
+  Concatenates results of two other embedders, hardcoded for Noop + SimpleWord
+  """
+  yaml_tag = '!OlFactorEmbedder'
+
+  @events.register_xnmt_handler
+  @serializable_init
+  def __init__(self,
+               emb_dim: numbers.Integral = 104,
+               speech_emb_dim: numbers.Integral = 40,
+               fact_emb_dim: numbers.Integral = 64,
+               weight_noise: numbers.Real = Ref("exp_global.weight_noise", default=0.0),
+               word_dropout: numbers.Real = 0.0,
+               fix_norm: Optional[numbers.Real] = None,
+               param_init: param_initializers.ParamInitializer = Ref("exp_global.param_init", default=bare(
+                 param_initializers.GlorotInitializer)),
+               vocab_size: Optional[numbers.Integral] = None,
+               vocab: Optional[vocabs.Vocab] = None,
+               yaml_path=None,
+               src_reader: Optional[input_readers.InputReader] = Ref("model.src_reader", default=None),
+               trg_reader: Optional[input_readers.InputReader] = Ref("model.trg_reader", default=None)) -> None:
+    #print(f"embedder received param_init: {param_init}")
+    self.emb_dim = emb_dim
+    self.speech_emb_dim = speech_emb_dim
+    self.fact_emb_dim = fact_emb_dim
+    self.weight_noise = weight_noise
+    self.word_dropout = word_dropout
+    self.fix_norm = fix_norm
+    self.word_id_mask = None
+    self.train = False
+    param_collection = param_collections.ParamManager.my_params(self)
+    self.vocab_size = self.choose_vocab_size(vocab_size, vocab, yaml_path, src_reader, trg_reader)
+    self.save_processed_arg("vocab_size", self.vocab_size)
+    self.embeddings = param_collection.add_lookup_parameters((self.vocab_size, self.fact_emb_dim),
+                             init=param_init.initializer((self.vocab_size, self.fact_emb_dim), is_lookup=True))
+
+  @events.handle_xnmt_event
+  def on_set_train(self, val):
+    self.train = val
+
+  @events.handle_xnmt_event
+  def on_start_sent(self, src):
+    self.word_id_mask = None
+
+  def embed_factor(self, x):
+    if self.train and self.word_dropout > 0.0 and self.word_id_mask is None:
+      batch_size = x.batch_size() if batchers.is_batched(x) else 1
+      self.word_id_mask = [set(np.random.choice(self.vocab_size, int(self.vocab_size * self.word_dropout), replace=False)) for _ in range(batch_size)]
+    # single mode
+    if not batchers.is_batched(x):
+      if self.train and self.word_id_mask and x in self.word_id_mask[0]:
+        ret = dy.zeros((self.fact_emb_dim,))
+      else:
+        ret = self.embeddings[x]
+        if self.fix_norm is not None:
+          ret = dy.cdiv(ret, dy.l2_norm(ret))
+          if self.fix_norm != 1:
+            ret *= self.fix_norm
+    # minibatch mode
+    else:
+      ret = self.embeddings.batch(x)
+      if self.fix_norm is not None:
+        ret = dy.cdiv(ret, dy.l2_norm(ret))
+        if self.fix_norm != 1:
+          ret *= self.fix_norm
+      if self.train and self.word_id_mask and any(x[i] in self.word_id_mask[i] for i in range(x.batch_size())):
+        dropout_mask = dy.inputTensor(np.transpose([[0.0]*self.fact_emb_dim if x[i] in self.word_id_mask[i] else [1.0]*self.fact_emb_dim for i in range(x.batch_size())]), batched=True)
+        ret = dy.cmult(ret, dropout_mask)
+    if self.train and self.weight_noise > 0.0:
+      ret = dy.noise(ret, self.weight_noise)
+    return ret
+
+  def embed_factor_sent(self, x):
+    # single mode
+    if not batchers.is_batched(x):
+      embeddings = [self.embed(word) for word in x]
+    # minibatch mode
+    else:
+      embeddings = []
+      seq_len = x.sent_len()
+      for single_sent in x: assert single_sent.sent_len()==seq_len
+      for word_i in range(seq_len):
+        batch = batchers.mark_as_batch([single_sent[word_i] for single_sent in x])
+        embeddings.append(self.embed(batch))
+    return embeddings
+  
+  def embed_speech(self, x):
+    return dy.inputTensor(x, batched=batchers.is_batched(x))
+
+  def embed_speech_sent(self, x):
+    # TODO refactor: seems a bit too many special cases that need to be distinguished
+    batched = batchers.is_batched(x)
+    first_sent = x[0] if batched else x
+    if hasattr(first_sent, "get_array"):
+      if not batched:
+        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=x.get_array())
+      else:
+        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=batchers.mark_as_batch(
+                                           [s for s in x]),
+                                           mask=x.mask)
+    else:
+      if not batched:
+        embeddings = [self.embed(word) for word in x]
+      else:
+        embeddings = []
+        for word_i in range(x.sent_len()):
+          embeddings.append(self.embed(batchers.mark_as_batch([single_sent[word_i] for single_sent in x])))
+      return embeddings
+
+  def embed(self, x):
+#    print(len(x))
+#    print(type(x))
+#    print(len(x[0]))
+#    if isinstance(x, tuple):
+#      speech = x[0]
+#      factor = x[1]
+#      return dy.concatenate([self.embed_speech(speech),self.embed_factor(factor)])
+#    else:
+###      for s in x:
+###        print(type(s))
+###        print(len(s))
+###      print("end")
+###      catted = [ dy.concatenate([self.embed_speech(s[0]),self.embed_factor(s[1])]) for s in x ]
+#      catted = [ dy.concatenate( [self.embed_speech(x.sents[0]),self.embed_factor(x.sents[1])] ) for s in x ]
+#      catted = [ dy.concatenate( [self.embed_speech(x[0]),self.embed_factor(x[1])] ) for s in x ]
+###      print(len(catted))
+###      print(len(catted[0]))
+      catted = dy.concatenate([x[0],x[1]])
+      return catted
+        
+
+  def embed_sent(self, x):
+    batched = batchers.is_batched(x)
+    if not batched: #ie single compoundsentence, not our case
+      speech_sent = x.sents[0].get_array()
+      factor_sent = x.sents[1]
+      embeddings = [self.embed(word) for word in zip(speech_sent,factor_sent)]
+    else:
+      embeddings = []
+      seq_len = x.sent_len()
+      for single_sent in x: assert single_sent.sent_len()==seq_len
+#      assert len(tmp)==x.batch_size()
+      for word_i in range(seq_len):
+        speech_batch = self.embed_speech_sent(batchers.mark_as_batch([single_sent[word_i] for single_sent in x.batches[0]]))
+        factor_batch = self.embed_factor_sent(batchers.mark_as_batch([single_sent[word_i] for single_sent in x.batches[1]]))
+        embeddings.append(self.embed([speech_batch,factor_batch]))
+    print("-----")
+    return expression_seqs.ExpressionSequence(expr_list=embeddings, mask=x.mask)
+
+
+#      print(x.sent_len())
+#      print(x.batch_size())
+#      print(" -- ")
+#      embeddings = []
+#      for word_i in range(x.sent_len()):
+###        embeddings.append(self.embed(batchers.mark_as_batch([(single_sent.sents[0].get_array()[word_i],single_sent.sents[1][word_i]) for single_sent in x])))
+###--> doesn't go because compoundbatch[idx] gives you compoundsent[idx].
+###        embeddings.append(self.embed(batchers.mark_as_batch([single_sent[word_i] for single_sent in x])))
+#        embeddings.append(self.embed(batchers.mark_as_batch(x[word_i])))
+#    print("-----")
+#    return expression_seqs.ExpressionSequence(expr_list=embeddings, mask=x.mask)
+
+
+#    first_sent = x[0] if batched else x
+#    if hasattr(first_sent, "get_array"):
+#      raise ValueError("!!! expected no get_array")
+#      if not batched:
+#        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=x.get_array())
+#      else:
+#        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=batchers.mark_as_batch(
+#                                           [s for s in x]),
+#                                           mask=x.mask)
+#    else:
+
+
+
+
+class FactorEmbedder(Embedder, Serializable):
+  """
+  This embedder performs no lookups but only passes through the inputs.
+
+  Normally, the input is a Sentence object, which is converted to an expression.
+
+  Args:
+    emb_dim: Size of the inputs
+  """
+
+  yaml_tag = '!FactorEmbedder'
+
+  @serializable_init
+  def __init__(self, emb_dim: Optional[numbers.Integral]) -> None:
+    self.emb_dim = emb_dim
+
+  def embed(self, x):
+    return dy.inputTensor(x, batched=batchers.is_batched(x))
+
+  def embed_sent(self, x):
+    # TODO refactor: seems a bit too many special cases that need to be distinguished
+    x = x.batches[0]
+    batched = batchers.is_batched(x)
+    first_sent = x[0] if batched else x
+    if hasattr(first_sent, "get_array"):
+      if not batched:
+        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=x.get_array())
+      else:
+        return expression_seqs.LazyNumpyExpressionSequence(lazy_data=batchers.mark_as_batch(
+                                           [s for s in x]),
+                                           mask=x.mask)
+    else:
+      if not batched:
+        embeddings = [self.embed(word) for word in x]
+      else:
+        embeddings = []
+        for word_i in range(x.sent_len()):
+          embeddings.append(self.embed(batchers.mark_as_batch([single_sent[word_i] for single_sent in x])))
+      return expression_seqs.ExpressionSequence(expr_list=embeddings, mask=x.mask)
+
